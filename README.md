@@ -1,15 +1,15 @@
-# 🔐 Hệ thống Truyền tải Tài liệu Nội bộ An toàn (Secure Internal Document Transfer)
+#  Hệ thống Truyền tải Tài liệu Nội bộ An toàn (Secure Internal Document Transfer)
 
 > Bài tập nhóm – Môn Mạng máy tính / Giao thức mạng (nhóm 3 SV)
 > **Nhóm giao thức đề xuất (ngoài danh sách 20 giao thức):** Truyền tệp bảo mật – **FTPS, SCP, rsync**, kết hợp **Syslog** (nhật ký kiểm toán) và **LDAP/Kerberos** (xác thực tập trung). Dùng **SFTP** làm mốc so sánh.
 
-## 👥 Thành viên
+##  Thành viên
 
 | STT | Họ và tên | MSSV | Vai trò |
 |-----|-----------|------|---------|
-| 1 | _..._ | _..._ | _..._ |
-| 2 | _..._ | _..._ | _..._ |
-| 3 | _..._ | _..._ | _..._ |
+| 1 | Ngô Tùng Anh Tú | _..._ | Nhóm Trưởng |
+| 2 | Dương Trần Bảo Linh | _..._ | Thành Viên |
+| 3 | Nguyễn Huỳnh Bảo Hoàng | _..._ | Thành Viên |
 
 ---
 
@@ -31,9 +31,9 @@ Xây dựng ứng dụng **truyền tải tài liệu nội bộ an toàn**, tro
 
 | Lĩnh vực | Nhu cầu chính | Tài liệu cần bảo vệ |
 |----------|---------------|---------------------|
-| 🏦 **Ngân hàng & Tài chính** | Chống rò rỉ, tuân thủ chuẩn an toàn thông tin **PCI DSS** | Hồ sơ tín dụng, báo cáo giao dịch mật |
-| 🏥 **Y tế & Bệnh viện lớn** | Bảo vệ quyền riêng tư bệnh nhân | Hồ sơ bệnh án điện tử, kết quả xét nghiệm |
-| ⚖️ **Văn phòng Luật sư & Kiểm toán** | Bảo mật thông tin khách hàng, có bằng chứng truy vết | Hợp đồng M&A, sổ sách kế toán, thỏa thuận NDA |
+|  **Ngân hàng & Tài chính** | Chống rò rỉ, tuân thủ chuẩn an toàn thông tin **PCI DSS** | Hồ sơ tín dụng, báo cáo giao dịch mật |
+|  **Y tế & Bệnh viện lớn** | Bảo vệ quyền riêng tư bệnh nhân | Hồ sơ bệnh án điện tử, kết quả xét nghiệm |
+|  **Văn phòng Luật sư & Kiểm toán** | Bảo mật thông tin khách hàng, có bằng chứng truy vết | Hợp đồng M&A, sổ sách kế toán, thỏa thuận NDA |
 
 ### 1.4. Giao thức sử dụng trong đề tài
 
@@ -82,8 +82,6 @@ Xây dựng ứng dụng **truyền tải tài liệu nội bộ an toàn**, tro
 | 8 | Kerberos | jcmturner/gokrb5 | https://github.com/jcmturner/gokrb5 | Thư viện Kerberos bằng Go |
 | 9 | SFTP (mốc so sánh) | pkg/sftp | https://github.com/pkg/sftp | Thư viện SFTP, dùng đo so sánh |
 
-> 📝 _Nhóm sẽ rà soát lại và bổ sung/cập nhật danh sách trong quá trình làm._
-
 ---
 
 ## 3. Nhóm sẽ làm thêm / phát triển thêm những gì mà các project tham khảo chưa có
@@ -108,12 +106,3 @@ Các project trên mỗi cái chỉ giải quyết **một giao thức hoặc m�
 - **Mở rộng (nếu đủ thời gian):** LDAP + RBAC, SSO Kerberos, link chia sẻ có thời hạn, quy trình phê duyệt, báo cáo tuân thủ.
 
 ---
-
-## 🚀 Cài đặt & chạy thử
-_(Sẽ cập nhật khi hoàn thiện ứng dụng)_
-
-## 🗂️ Phân công & tiến độ
-_(Sẽ cập nhật theo commit của từng thành viên)_
-
-## 📄 Giấy phép
-_(Chọn license, ví dụ MIT)_
