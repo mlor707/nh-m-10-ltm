@@ -1,0 +1,5 @@
+{
+  "alice": {"role": "admin",   "clearance": "SECRET"},
+  "bob":   {"role": "staff",   "clearance": "INTERNAL"},
+  "carol": {"role": "auditor", "clearance": "CONFIDENTIAL"}
+}

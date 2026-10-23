@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Truyền tải tài liệu nội bộ an toàn</title>
+<style>
+:root {
+  --bg: #e9edf1;
+  --panel: #ffffff;
+  --ink: #17212b;
+  --muted: #5b6875;
+  --line: #d3dae1;
+  --side: #1b2b3a;
+  --side-ink: #dfe7ee;
+  --accent: #0b6b78;
+  --accent-ink: #ffffff;
+  --danger: #a4262c;
+  --ok: #1d6b3a;
+  /* Mỗi mức mật có một màu cố định – dùng nhất quán ở mọi nơi */
+  --lv-PUBLIC: #7b8794;
+  --lv-INTERNAL: #2f6fb0;
+  --lv-CONFIDENTIAL: #b8740a;
+  --lv-SECRET: #a4262c;
+  --serif: Georgia, "Times New Roman", serif;
+  --sans: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #11181f; --panel: #1a232c; --ink: #e6ecf1; --muted: #93a1ae; --line: #2b3946;
+    --side: #0c1218; --accent: #3cb6c6; --accent-ink: #06222a; --danger: #f08a8f; --ok: #6fcf93;
+    --lv-PUBLIC: #9aa7b3; --lv-INTERNAL: #6aa6e6; --lv-CONFIDENTIAL: #e0a23a; --lv-SECRET: #f08a8f;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { font-family: var(--sans); background: var(--bg); color: var(--ink); font-size: 15px; line-height: 1.5; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+.app { display: grid; grid-template-columns: 260px 1fr; min-height: 100%; }
+aside { background: var(--side); color: var(--side-ink); padding: 24px 18px; display: flex; flex-direction: column; gap: 28px; }
+.brand { font-family: var(--serif); font-size: 20px; line-height: 1.25; }
+.brand small { display: block; font-family: var(--sans); font-size: 12.5px; color: #9fb0bf; margin-top: 6px; }
+.who label { display: block; font-size: 12.5px; color: #9fb0bf; margin-bottom: 6px; }
+.who select { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #36495a; background: #14212d; color: var(--side-ink); font: inherit; }
+.who .meta { margin-top: 10px; font-size: 13px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+nav { display: flex; flex-direction: column; gap: 4px; }
+nav button { text-align: left; background: transparent; border: 0; color: var(--side-ink); padding: 10px 12px; border-radius: 6px; font: inherit; cursor: pointer; border-left: 3px solid transparent; }
+nav button:hover { background: #24384a; }
+nav button[aria-selected="true"] { background: #24384a; border-left-color: #54c3d1; font-weight: 600; }
+.demo-note { margin-top: auto; font-size: 12px; color: #8497a7; }
+
+main { padding: 32px clamp(16px, 4vw, 48px); max-width: 1100px; width: 100%; }
+h1 { font-family: var(--serif); font-weight: 600; font-size: 28px; margin: 0 0 4px; }
+.sub { color: var(--muted); margin: 0 0 24px; max-width: 62ch; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 22px; }
+
+/* Chip mức mật: dạng “tab hồ sơ” với cạnh màu bên trái */
+.lv { display: inline-flex; align-items: center; padding: 1px 9px 1px 8px; font-size: 13px; font-weight: 600; border-left: 4px solid currentColor; background: color-mix(in srgb, currentColor 12%, transparent); border-radius: 2px 6px 6px 2px; white-space: nowrap; }
+.lv-PUBLIC { color: var(--lv-PUBLIC); } .lv-INTERNAL { color: var(--lv-INTERNAL); }
+.lv-CONFIDENTIAL { color: var(--lv-CONFIDENTIAL); } .lv-SECRET { color: var(--lv-SECRET); }
+.tag { display: inline-block; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; color: var(--muted); }
+.tag.ok { color: var(--ok); border-color: currentColor; } .tag.bad { color: var(--danger); border-color: currentColor; }
+
+.form { display: grid; gap: 18px; max-width: 620px; }
+.field label, .field .lab { display: block; font-weight: 600; margin-bottom: 6px; }
+.field .hint { color: var(--muted); font-size: 13.5px; margin-top: 4px; }
+select, input[type=file] { font: inherit; }
+select.full { width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
+.drop { border: 2px dashed var(--line); border-radius: 8px; padding: 28px 16px; text-align: center; color: var(--muted); cursor: pointer; background: color-mix(in srgb, var(--accent) 4%, transparent); }
+.drop.over, .drop:hover { border-color: var(--accent); color: var(--ink); }
+.drop strong { color: var(--ink); display: block; font-size: 16px; word-break: break-all; }
+.levels { display: flex; flex-wrap: wrap; gap: 8px; }
+.levels label { font-weight: 400; margin: 0; cursor: pointer; }
+.levels input { position: absolute; opacity: 0; }
+.levels input:checked + .lv { box-shadow: 0 0 0 2px currentColor; }
+.levels input:focus-visible + .lv { outline: 3px solid var(--accent); outline-offset: 2px; }
+.levels input:disabled + .lv { opacity: .35; cursor: not-allowed; }
+.btn { font: inherit; font-weight: 600; background: var(--accent); color: var(--accent-ink); border: 0; padding: 10px 18px; border-radius: 6px; cursor: pointer; }
+.btn:hover { filter: brightness(1.08); } .btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); padding: 5px 12px; font-weight: 600; }
+.msg { padding: 10px 14px; border-radius: 6px; border: 1px solid var(--line); margin-top: 16px; }
+.msg.ok { border-color: var(--ok); color: var(--ok); } .msg.err { border-color: var(--danger); color: var(--danger); }
+
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th { font-weight: 600; color: var(--muted); font-size: 13.5px; white-space: nowrap; }
+td.mono { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+.toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.empty { color: var(--muted); padding: 28px 8px; }
+.bar { height: 8px; background: color-mix(in srgb, var(--accent) 80%, transparent); border-radius: 4px; min-width: 2px; }
+.hidden { display: none !important; }
+
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; }
+  aside { padding: 16px; gap: 16px; }
+  nav { flex-direction: row; flex-wrap: wrap; }
+  .demo-note { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand">Truyền tải tài liệu nội bộ an toàn<small>Mọi tài liệu được mã hóa trước khi rời máy bạn</small></div>
+    <div class="who">
+      <label for="user">Đăng nhập với tư cách</label>
+      <select id="user"></select>
+      <div class="meta" id="whoMeta"></div>
+    </div>
+    <nav role="tablist" aria-label="Chức năng" id="nav"></nav>
+    <div class="demo-note">Chế độ demo: chọn người dùng không cần mật khẩu. Bản chính thức sẽ đăng nhập bằng LDAP/Kerberos.</div>
+  </aside>
+
+  <main>
+    <section id="view-send" hidden>
+      <h1>Gửi tài liệu</h1>
+      <p class="sub">Tài liệu được mã hóa AES-256 ngay trên máy bạn, rồi gửi đi bằng giao thức phù hợp với tình huống.</p>
+      <div class="panel">
+        <form class="form" id="sendForm">
+          <div class="field">
+            <span class="lab" id="fileLab">Tài liệu</span>
+            <div class="drop" id="drop" tabindex="0" role="button" aria-labelledby="fileLab">
+              <span id="dropText">Kéo thả file vào đây hoặc bấm để chọn</span>
+            </div>
+            <input type="file" id="file" class="hidden">
+          </div>
+          <div class="field">
+            <span class="lab">Mức mật</span>
+            <div class="levels" id="levels" role="radiogroup" aria-label="Mức mật"></div>
+            <div class="hint" id="levelHint"></div>
+          </div>
+          <div class="field">
+            <label for="scenario">Gửi cho ai</label>
+            <select id="scenario" class="full"></select>
+            <div class="hint" id="scenarioHint"></div>
+          </div>
+          <div><button class="btn" id="sendBtn" type="submit">Mã hóa và gửi</button></div>
+        </form>
+        <div id="sendMsg" role="status"></div>
+      </div>
+    </section>
+
+    <section id="view-docs" hidden>
+      <h1>Tài liệu đã gửi</h1>
+      <p class="sub">Chỉ hiện những tài liệu có mức mật không vượt quá cấp độ của bạn. Khi tải về, hệ thống tự giải mã.</p>
+      <div class="panel">
+        <div class="tablewrap" id="docsBox"></div>
+        <div id="docsMsg" role="status"></div>
+      </div>
+    </section>
+
+    <section id="view-audit" hidden>
+      <h1>Nhật ký kiểm toán</h1>
+      <p class="sub">Mỗi dòng gắn với hash của dòng trước. Nếu ai sửa hoặc xóa một dòng, phép kiểm tra toàn vẹn sẽ báo lỗi.</p>
+      <div class="panel">
+        <div class="toolbar">
+          <button class="btn" id="verifyBtn" type="button">Kiểm tra toàn vẹn</button>
+          <button class="btn ghost" id="auditReload" type="button">Tải lại</button>
+          <span id="verifyRes" role="status"></span>
+        </div>
+        <div class="tablewrap" id="auditBox"></div>
+      </div>
+    </section>
+
+    <section id="view-bench" hidden>
+      <h1>So sánh giao thức</h1>
+      <p class="sub">Đo thời gian gửi và nhận cùng một file qua từng giao thức. Giao thức nào chưa có máy chủ sẽ báo lỗi kết nối.</p>
+      <div class="panel">
+        <div class="toolbar">
+          <label for="benchSize">Dung lượng thử</label>
+          <select id="benchSize" class="full" style="width:auto">
+            <option value="1">1 MB</option><option value="5" selected>5 MB</option><option value="10">10 MB</option>
+          </select>
+          <button class="btn" id="benchBtn" type="button">Chạy so sánh</button>
+        </div>
+        <div class="tablewrap" id="benchBox"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+"use strict";
+const LEVEL_VI = { PUBLIC: "Công khai", INTERNAL: "Nội bộ", CONFIDENTIAL: "Mật", SECRET: "Tuyệt mật" };
+const SCENARIO_VI = {
+  partner:  ["Đối tác hoặc hệ thống cũ", "Gửi bằng FTPS (FTP có TLS), tương thích nhiều hệ thống ngân hàng, bệnh viện."],
+  admin:    ["Quản trị viên chuyển nhanh", "Gửi bằng SCP qua SSH, gọn nhẹ, hợp để chuyển từng file giữa các máy chủ."],
+  sync:     ["Đồng bộ giữa các chi nhánh", "Gửi bằng rsync, chỉ truyền phần thay đổi nên nhanh khi đồng bộ nhiều lần."],
+  baseline: ["Chỉ để so sánh", "Gửi bằng SFTP, dùng làm mốc đối chiếu với ba giao thức còn lại."],
+};
+const NAV = [
+  { id: "send",  label: "Gửi tài liệu",       perm: "send" },
+  { id: "docs",  label: "Tài liệu đã gửi",    perm: "receive" },
+  { id: "audit", label: "Nhật ký kiểm toán",  perm: "audit" },
+  { id: "bench", label: "So sánh giao thức",  perm: "benchmark" },
+];
+const ROLE_VI = { admin: "Quản trị viên", staff: "Nhân viên", auditor: "Kiểm toán viên" };
+
+const $ = (id) => document.getElementById(id);
+const state = { me: null, protocols: {}, tab: null, file: null, level: "INTERNAL" };
+
+/* Tạo phần tử DOM an toàn (không dùng innerHTML với dữ liệu từ server) */
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") el.className = v; else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) el.append(kid.nodeType ? kid : document.createTextNode(kid));
+  return el;
+}
+const levelChip = (l) => h("span", { class: "lv lv-" + l }, LEVEL_VI[l] || l);
+const fmtTime = (iso) => new Date(iso).toLocaleString("vi-VN");
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { ...(opts.headers || {}), "X-Username": state.user } });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try { detail = (await res.json()).detail || detail; } catch (_) {}
+    throw new Error(detail);
+  }
+  return res;
+}
+function say(el, text, kind) { el.replaceChildren(text ? h("div", { class: "msg " + kind }, text) : ""); }
+
+/* ---------- Đăng nhập demo ---------- */
+async function init() {
+  state.protocols = await (await fetch("/protocols")).json();
+  const users = await (await fetch("/users")).json();
+  const sel = $("user");
+  users.forEach((u) => sel.append(h("option", { value: u.username }, `${u.username} (${ROLE_VI[u.role] || u.role})`)));
+  state.user = localStorage.getItem("st_user");
+  if (!users.some((u) => u.username === state.user)) state.user = users[0].username;
+  sel.value = state.user;
+  sel.addEventListener("change", () => { state.user = sel.value; localStorage.setItem("st_user", state.user); loadMe(); });
+  await loadMe();
+}
+
+async function loadMe() {
+  state.me = await (await api("/me")).json();
+  $("whoMeta").replaceChildren("Cấp độ tối đa:", levelChip(state.me.clearance));
+  const tabs = NAV.filter((n) => state.me.permissions.includes(n.perm));
+  const nav = $("nav");
+  nav.replaceChildren(...tabs.map((t) => h("button", { role: "tab", id: "tab-" + t.id, "aria-selected": "false", onclick: () => show(t.id) }, t.label)));
+  buildLevels(); buildScenarios();
+  show(tabs.some((t) => t.id === state.tab) ? state.tab : tabs[0].id);
+}
+
+function show(id) {
+  state.tab = id;
+  NAV.forEach((n) => { $("view-" + n.id).hidden = n.id !== id; const b = $("tab-" + n.id); if (b) b.setAttribute("aria-selected", String(n.id === id)); });
+  if (id === "docs") loadDocs();
+  if (id === "audit") loadAudit();
+  if (id === "send") { say($("sendMsg")); }
+}
+
+/* ---------- Gửi tài liệu ---------- */
+function buildLevels() {
+  const order = state.me.levels, max = order.indexOf(state.me.clearance);
+  if (order.indexOf(state.level) > max) state.level = order[max];
+  $("levels").replaceChildren(...order.map((l, i) => {
+    const input = h("input", { type: "radio", name: "level", value: l });
+    if (i > max) input.disabled = true;
+    if (l === state.level) input.checked = true;
+    input.addEventListener("change", () => { state.level = l; });
+    return h("label", {}, input, levelChip(l));
+  }));
+  $("levelHint").textContent = max < order.length - 1 ? "Mức mờ đi là cao hơn cấp độ của bạn nên không chọn được." : "";
+}
+function buildScenarios() {
+  const sel = $("scenario");
+  sel.replaceChildren(...Object.keys(state.protocols).filter((k) => SCENARIO_VI[k]).map((k) => h("option", { value: k }, `${SCENARIO_VI[k][0]} (${state.protocols[k].toUpperCase()})`)));
+  const upd = () => { $("scenarioHint").textContent = SCENARIO_VI[sel.value][1]; };
+  sel.onchange = upd; upd();
+}
+function setFile(f) {
+  state.file = f || null;
+  $("dropText").replaceChildren(f ? h("strong", {}, f.name) : "Kéo thả file vào đây hoặc bấm để chọn", f ? `${(f.size / 1024 / 1024).toFixed(2)} MB. Bấm để đổi file.` : "");
+}
+const drop = $("drop");
+drop.addEventListener("click", () => $("file").click());
+drop.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("file").click(); } });
+drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); setFile(e.dataTransfer.files[0]); });
+$("file").addEventListener("change", (e) => setFile(e.target.files[0]));
+
+$("sendForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const out = $("sendMsg");
+  if (!state.file) return say(out, "Chọn một file trước khi gửi.", "err");
+  const fd = new FormData();
+  fd.append("file", state.file); fd.append("level", state.level); fd.append("scenario", $("scenario").value);
+  $("sendBtn").disabled = true; say(out, "Đang mã hóa và gửi...", "ok");
+  try {
+    const r = await (await api("/documents", { method: "POST", body: fd })).json();
+    say(out, `Đã mã hóa và gửi "${state.file.name}" qua ${r.protocol.toUpperCase()}.`, "ok");
+    setFile(null); $("file").value = "";
+  } catch (err) { say(out, "Không gửi được: " + err.message, "err"); }
+  finally { $("sendBtn").disabled = false; }
+});
+
+/* ---------- Danh sách tài liệu ---------- */
+async function loadDocs() {
+  const box = $("docsBox"); say($("docsMsg"));
+  try {
+    const docs = await (await api("/documents")).json();
+    if (!docs.length) return box.replaceChildren(h("div", { class: "empty" }, "Chưa có tài liệu nào. Gửi tài liệu đầu tiên ở mục Gửi tài liệu."));
+    box.replaceChildren(h("table", {},
+      h("thead", {}, h("tr", {}, ...["Tên tài liệu", "Mức mật", "Giao thức", "Người gửi", "Thời gian", ""].map((t) => h("th", {}, t)))),
+      h("tbody", {}, ...docs.map((d) => h("tr", {},
+        h("td", {}, d.name), h("td", {}, levelChip(d.level)), h("td", {}, d.protocol.toUpperCase()),
+        h("td", {}, d.sender), h("td", {}, fmtTime(d.ts)),
+        h("td", {}, h("button", { class: "btn ghost", type: "button", onclick: () => download(d) }, "Tải về và giải mã")))))));
+  } catch (err) { box.replaceChildren(); say($("docsMsg"), err.message, "err"); }
+}
+async function download(d) {
+  say($("docsMsg"), `Đang tải và giải mã "${d.name}"...`, "ok");
+  try {
+    const blob = await (await api("/documents/" + encodeURIComponent(d.name) + "/download")).blob();
+    const a = h("a", { href: URL.createObjectURL(blob), download: d.name });
+    document.body.append(a); a.click(); a.remove();
+    say($("docsMsg"), `Đã giải mã và tải "${d.name}".`, "ok");
+  } catch (err) { say($("docsMsg"), "Không tải được: " + err.message, "err"); }
+}
+
+/* ---------- Audit ---------- */
+async function loadAudit() {
+  $("verifyRes").replaceChildren();
+  try {
+    const rows = (await (await api("/audit")).json()).reverse().slice(0, 200);
+    if (!rows.length) return $("auditBox").replaceChildren(h("div", { class: "empty" }, "Chưa có hoạt động nào được ghi lại."));
+    const act = { send: "Gửi", receive: "Nhận" }, st = { ok: "Thành công", denied: "Bị từ chối", error: "Lỗi" };
+    $("auditBox").replaceChildren(h("table", {},
+      h("thead", {}, h("tr", {}, ...["Thời gian", "Người dùng", "Hành động", "Tài liệu", "Giao thức", "Kết quả"].map((t) => h("th", {}, t)))),
+      h("tbody", {}, ...rows.map((r) => h("tr", {},
+        h("td", {}, fmtTime(r.ts)), h("td", {}, r.user), h("td", {}, act[r.action] || r.action), h("td", {}, r.target),
+        h("td", {}, (r.details.protocol || "").toUpperCase()),
+        h("td", {}, h("span", { class: "tag " + (r.status === "ok" ? "ok" : "bad"), title: r.details.error || "" }, st[r.status] || r.status)))))));
+  } catch (err) { $("auditBox").replaceChildren(h("div", { class: "msg err" }, err.message)); }
+}
+$("auditReload").addEventListener("click", loadAudit);
+$("verifyBtn").addEventListener("click", async () => {
+  try {
+    const r = await (await api("/audit/verify")).json();
+    $("verifyRes").replaceChildren(r.valid ? h("span", { class: "tag ok" }, "Nhật ký toàn vẹn, chưa bị sửa") : h("span", { class: "tag bad" }, `Nhật ký bị sửa tại dòng ${r.first_bad_line}`));
+  } catch (err) { $("verifyRes").replaceChildren(h("span", { class: "tag bad" }, err.message)); }
+});
+
+/* ---------- Benchmark ---------- */
+$("benchBtn").addEventListener("click", async () => {
+  const box = $("benchBox"); $("benchBtn").disabled = true;
+  box.replaceChildren(h("div", { class: "empty" }, "Đang đo, có thể mất vài chục giây..."));
+  try {
+    const rows = await (await api("/benchmark?size_mb=" + $("benchSize").value)).json();
+    const max = Math.max(1, ...rows.map((r) => r.mbps_up || 0));
+    box.replaceChildren(h("table", {},
+      h("thead", {}, h("tr", {}, ...["Giao thức", "Gửi (giây)", "Nhận (giây)", "Tốc độ gửi (Mbps)", "Toàn vẹn"].map((t) => h("th", {}, t)))),
+      h("tbody", {}, ...rows.map((r) => r.error
+        ? h("tr", {}, h("td", {}, r.protocol.toUpperCase()), h("td", { colspan: 4 }, h("span", { class: "tag bad" }, "Không đo được: " + r.error)))
+        : h("tr", {}, h("td", {}, r.protocol.toUpperCase()), h("td", {}, r.upload_s), h("td", {}, r.download_s),
+            h("td", {}, h("div", { class: "bar", style: `width:${Math.round((r.mbps_up / max) * 160)}px` }), r.mbps_up),
+            h("td", {}, h("span", { class: "tag " + (r.intact ? "ok" : "bad") }, r.intact ? "Đúng" : "Sai")))))));
+  } catch (err) { box.replaceChildren(h("div", { class: "msg err" }, err.message)); }
+  finally { $("benchBtn").disabled = false; }
+});
+
+init().catch((e) => document.querySelector("main").prepend(h("div", { class: "msg err" }, "Không khởi động được: " + e.message)));
+</script>
+</body>
+</html>
