@@ -1,24 +1,108 @@
-# TrustFlow - Hệ thống Truyền tải Tài liệu Nội bộ An toàn
-## 1. Định hướng làm đề tài của nhóm:
-*   **Mục tiêu dự án:** Xây dựng hệ thống Client-Server truyền tải tài liệu nội bộ an toàn tuyệt đối bằng giao thức HTTPS (REST API) kết hợp tính năng Chunked Upload và mã hóa luồng dữ liệu.
-*   **Thị trường và Tệp khách hàng hướng tới:** Ứng dụng được thiết kế linh hoạt để phục vụ các tổ chức có yêu cầu bảo mật dữ liệu ở mức độ cao nhất, bao gồm:
-    *   **Khối Ngân hàng & Tài chính:** Chống rò rỉ hồ sơ tín dụng, báo cáo giao dịch mật, tuân thủ chuẩn an toàn thông tin PCI DSS.
-    *   **Hệ thống Y tế & Bệnh viện lớn:** Bảo vệ hồ sơ bệnh án điện tử, kết quả xét nghiệm.
-    *   **Văn phòng Luật sư & Kiểm toán:** Bảo mật hợp đồng M&A, sổ sách kế toán, thỏa thuận NDA.
-*   **Định hướng kỹ thuật cốt lõi:** Áp dụng kiến trúc "Zero-Knowledge" (Không tri thức), sử dụng mã hóa đầu cuối (End-to-End Encryption - E2EE). Máy chủ backend chỉ làm trạm trung chuyển qua cổng 443, hoàn toàn không thể đọc được nội dung file được mã hóa từ Client.
+#  Hệ thống Truyền tải Tài liệu Nội bộ An toàn (Secure Internal Document Transfer)
 
-## 2. Các Project tham khảo + Link github của các project đó
-*   **Send (Fork của Mozilla Send)**
-    *   *Link GitHub:* [timvisee/send](https://github.com/timvisee/send)
-    *   *Mô tả:* Hệ thống chia sẻ file E2EE, mã hóa trực tiếp phía Client (Client-side) bằng Web Crypto API trước khi tải lên máy chủ.
-*   **YeetFile**
-    *   *Link GitHub:* [timvisee/send](https://github.com/benbusby/yeetfile)
-    *   *Mô tả:* Nền tảng tự lưu trữ chia sẻ file mã hóa qua REST API, hỗ trợ phân quyền người dùng độc lập.
-*   **Magic-Wormhole**
-    *   *Link GitHub:* [timvisee/send](https://github.com/magic-wormhole/magic-wormhole)
-    *   *Mô tả:* Ứng dụng truyền tải ngang hàng sử dụng giao thức PAKE để trao đổi khóa giải mã an toàn mà không bị rò rỉ qua mạng.
-## 3. Tóm tắt Nhóm sẽ làm thêm hay phát triển thêm những gì mà các Project tham khảo chưa có hay chưa hay
-*   **Tích hợp Dynamic Watermarking (Đóng dấu động):** Các dự án tham khảo không chống được việc chụp màn hình. Nhóm sẽ phát triển chế độ "View-Only", tự động chèn watermark (Tên nhân viên, IP, Thời gian) chìm lên tài liệu để truy vết nếu có rò rỉ.
-*   **Data Hashing xác thực toàn vẹn (SHA-256):** Tự động đối chiếu mã băm ở cả Client và Server trong từng HTTP Request, đảm bảo báo cáo giao dịch hoặc bằng chứng số không bị sai lệch dù chỉ một byte.
-*   **Quản lý luồng tải (Rate Limiting) qua API:** Thiết lập hàng rào giới hạn số lượng request tải xuống theo giờ dựa trên JWT, chặn đứng rủi ro nhân viên cố tình tải hàng loạt dữ liệu ra ngoài.
-*   **Hủy dữ liệu vật lý (Secure Wipe):** Thay vì chỉ xóa đường dẫn trong CSDL, hệ thống sẽ có luồng chạy ngầm ghi đè dữ liệu rác lên vùng nhớ ổ cứng chứa file gốc trước khi xóa hoàn toàn khỏi server sau 24 giờ.
+> Bài tập nhóm – Môn Mạng máy tính / Giao thức mạng (nhóm 3 SV)
+> **Nhóm giao thức đề xuất (ngoài danh sách 20 giao thức):** Truyền tệp bảo mật – **FTPS, SCP, rsync**, kết hợp **Syslog** (nhật ký kiểm toán) và **LDAP/Kerberos** (xác thực tập trung). Dùng **SFTP** làm mốc so sánh.
+
+##  Thành viên
+
+| STT | Họ và tên | MSSV | Vai trò |
+|-----|-----------|------|---------|
+| 1 | Ngô Tùng Anh Tú | _..._ | Nhóm Trưởng |
+| 2 | Dương Trần Bảo Linh | _..._ | Thành Viên |
+| 3 | Nguyễn Huỳnh Bảo Hoàng | _..._ | Thành Viên |
+
+---
+
+## 1. Định hướng làm đề tài
+
+### 1.1. Bài toán
+Các tổ chức xử lý dữ liệu nhạy cảm vẫn thường chia sẻ tài liệu nội bộ qua email, USB, Zalo/Messenger hoặc FTP không mã hóa. Cách này dễ gây **rò rỉ dữ liệu, không kiểm soát được ai đã truy cập, không có bằng chứng truy vết** khi xảy ra sự cố.
+
+### 1.2. Mục tiêu
+Xây dựng ứng dụng **truyền tải tài liệu nội bộ an toàn**, trong đó:
+- Hỗ trợ **nhiều giao thức truyền tệp bảo mật (FTPS, SCP, rsync)** và tự chọn giao thức phù hợp theo từng tình huống sử dụng.
+- Mọi thao tác (upload / download / xóa / chia sẻ) đều được **xác thực, phân quyền và ghi nhật ký kiểm toán tập trung**.
+- Dữ liệu được mã hóa trên đường truyền **và** mã hóa phía client trước khi gửi (end-to-end).
+- Có chức năng **so sánh hiệu năng và mức độ bảo mật** giữa các giao thức (kèm SFTP làm mốc) để giúp tổ chức lựa chọn.
+- Dễ triển khai on-premise trong mạng nội bộ.
+
+### 1.3. Thị trường & tệp khách hàng hướng tới
+Ứng dụng được thiết kế linh hoạt để phục vụ các tổ chức có yêu cầu bảo mật dữ liệu ở mức cao nhất:
+
+| Lĩnh vực | Nhu cầu chính | Tài liệu cần bảo vệ |
+|----------|---------------|---------------------|
+|  **Ngân hàng & Tài chính** | Chống rò rỉ, tuân thủ chuẩn an toàn thông tin **PCI DSS** | Hồ sơ tín dụng, báo cáo giao dịch mật |
+|  **Y tế & Bệnh viện lớn** | Bảo vệ quyền riêng tư bệnh nhân | Hồ sơ bệnh án điện tử, kết quả xét nghiệm |
+|  **Văn phòng Luật sư & Kiểm toán** | Bảo mật thông tin khách hàng, có bằng chứng truy vết | Hợp đồng M&A, sổ sách kế toán, thỏa thuận NDA |
+
+### 1.4. Giao thức sử dụng trong đề tài
+
+**Nhóm giao thức chính – Truyền tệp bảo mật (nhóm tự đề xuất):**
+
+| Giao thức | Làm gì | Tầng OSI | Tình huống sử dụng trong hệ thống |
+|-----------|--------|----------|-----------------------------------|
+| **FTPS** (FTP over TLS) | Truyền tệp, kênh điều khiển/dữ liệu mã hóa bằng TLS | L7 (TLS ở L5-L6), chạy trên TCP (L4) | Trao đổi với đối tác/hệ thống cũ (ngân hàng, bệnh viện) vẫn dùng FTP |
+| **SCP** | Sao chép tệp qua SSH | L7, chạy trên TCP (L4) | Quản trị viên chuyển nhanh từng tệp giữa các máy chủ |
+| **rsync** | Đồng bộ tệp, chỉ gửi phần thay đổi | L7, thường qua SSH/TCP (L4) | Đồng bộ và sao lưu tài liệu giữa các chi nhánh |
+
+**Giao thức hỗ trợ:**
+
+| Giao thức | Vai trò | Tầng OSI |
+|-----------|---------|----------|
+| **Syslog** | Gom nhật ký truy cập tập trung phục vụ kiểm toán | L7 |
+| **LDAP/LDAPS** | Thư mục người dùng, phòng ban, phân quyền | L7 |
+| **Kerberos** | Xác thực bằng vé (ticket), đăng nhập một lần (SSO) | L7 |
+
+**Giao thức đối chiếu (có trong danh sách 20 giao thức):** **SFTP** – dùng làm mốc so sánh hiệu năng/bảo mật với FTPS, SCP, rsync.
+
+### 1.5. Kiến trúc tổng quan (dự kiến)
+
+```
+                         ┌─ FTPS  (đối tác / hệ thống cũ)
+[Client App] ─ mã hóa ─> [Gateway chọn giao thức] ─ SCP   (quản trị, chuyển nhanh)
+  AES-256 phía client             │                └─ rsync (đồng bộ chi nhánh)
+                                  │
+        Xác thực (LDAP / Kerberos) ┤
+        Nhật ký kiểm toán (Syslog) ┘──> [Kho lưu trữ mã hóa]
+```
+
+---
+
+## 2. Các project tham khảo + Link GitHub
+
+| # | Giao thức | Project | Link GitHub | Dùng để tham khảo |
+|---|-----------|---------|-------------|-------------------|
+| 1 | FTPS | fclairamb/ftpserverlib | https://github.com/fclairamb/ftpserverlib | Thư viện FTP server (Go) có hỗ trợ TLS/FTPS |
+| 2 | FTPS | goftp/server | https://github.com/goftp/server | Xây FTP server tùy biến, cấu hình TLS |
+| 3 | SCP / SSH | OpenSSH Portable | https://github.com/openssh/openssh-portable | Cài đặt chuẩn của SSH và scp |
+| 4 | SCP | bramvdbogaerde/go-scp | https://github.com/bramvdbogaerde/go-scp | Thư viện SCP client bằng Go |
+| 5 | rsync | RsyncProject/rsync | https://github.com/RsyncProject/rsync | Cài đặt chính thức của rsync, thuật toán delta |
+| 6 | Syslog | rsyslog/rsyslog | https://github.com/rsyslog/rsyslog | Gom và chuyển tiếp log tập trung |
+| 7 | LDAP | go-ldap/ldap | https://github.com/go-ldap/ldap | Thư viện LDAP client bằng Go |
+| 8 | Kerberos | jcmturner/gokrb5 | https://github.com/jcmturner/gokrb5 | Thư viện Kerberos bằng Go |
+| 9 | SFTP (mốc so sánh) | pkg/sftp | https://github.com/pkg/sftp | Thư viện SFTP, dùng đo so sánh |
+
+---
+
+## 3. Nhóm sẽ làm thêm / phát triển thêm những gì mà các project tham khảo chưa có
+
+Các project trên mỗi cái chỉ giải quyết **một giao thức hoặc một khâu riêng lẻ**: chúng lo việc *truyền* hoặc *xác thực* hoặc *ghi log*, nhưng **chưa có hệ thống gắn kết tất cả thành giải pháp hoàn chỉnh cho nghiệp vụ bảo mật của tổ chức**. Nhóm sẽ bổ sung:
+
+| # | Tính năng nhóm phát triển thêm | Các project tham khảo còn thiếu gì? | Giá trị cho khách hàng |
+|---|--------------------------------|--------------------------------------|------------------------|
+| 1 | **Gateway hợp nhất FTPS + SCP + rsync**, tự chọn giao thức theo tình huống | Mỗi project chỉ hỗ trợ 1 giao thức, người dùng phải tự cấu hình riêng | Một giao diện duy nhất cho mọi nhu cầu |
+| 2 | **Công cụ so sánh giao thức** (tốc độ, tài nguyên, mức mã hóa) kèm SFTP làm mốc | Không có | Giúp tổ chức chọn giao thức phù hợp, có số liệu |
+| 3 | **Mã hóa đầu-cuối phía client** (AES-256-GCM) trước khi upload | Các giao thức chỉ mã hóa trên đường truyền; file nằm trên server ở dạng rõ | Admin server cũng không đọc được nội dung |
+| 4 | **Phân quyền theo vai trò (RBAC)** và mức mật, đồng bộ từ LDAP | Chỉ có quyền file/thư mục cơ bản | Đúng quy trình nội bộ ngân hàng, bệnh viện |
+| 5 | **Đăng nhập một lần (SSO) bằng Kerberos** | Thường chỉ user/password | Giảm nguy cơ lộ tài khoản |
+| 6 | **Audit log tập trung qua Syslog, chống chỉnh sửa** (hash chain) | Log rời rạc theo từng dịch vụ, có thể bị sửa | Truy vết khi có sự cố, phục vụ kiểm toán |
+| 7 | **Link chia sẻ có thời hạn / giới hạn số lần tải / thu hồi** | Không có | Chia sẻ hợp đồng NDA, M&A có kiểm soát |
+| 8 | **Quy trình phê duyệt** trước khi tài liệu mật được chia sẻ ra ngoài | Không có | Chống rò rỉ do nhầm lẫn hoặc nội gián |
+| 9 | **Giao diện quản trị & báo cáo tuân thủ** (dashboard, xuất báo cáo) | Hầu hết chỉ dòng lệnh / cấu hình file | Phù hợp người dùng nghiệp vụ không chuyên IT |
+
+### Phạm vi thực hiện
+
+- **MVP (bắt buộc):** Gateway FTPS + SCP + rsync, mã hóa phía client, ghi log qua Syslog, công cụ so sánh với SFTP, giao diện web cơ bản.
+- **Mở rộng (nếu đủ thời gian):** LDAP + RBAC, SSO Kerberos, link chia sẻ có thời hạn, quy trình phê duyệt, báo cáo tuân thủ.
+
+---
