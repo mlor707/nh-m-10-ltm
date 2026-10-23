@@ -1,0 +1,16 @@
+# Máy chủ SSH thử nghiệm cho SCP / SFTP / rsync.  Dùng:  docker compose up -d --build
+services:
+  sshd:
+    build: ./docker
+    container_name: securetransfer-sshd
+    ports:
+      - "127.0.0.1:2222:22"          # chỉ mở trên máy bạn, không ra mạng ngoài
+    volumes:
+      - ./data/ssh_dev/authorized_keys:/keys/authorized_keys:ro
+      - hostkeys:/hostkeys
+      - inbox:/home/transfer         # nơi các file *.enc được gửi tới
+    restart: unless-stopped
+
+volumes:
+  hostkeys: {}
+  inbox: {}
