@@ -10,10 +10,11 @@ __all__ = ["TransferBackend", "TransferError", "build_backends"]
 
 
 def build_backends(s: Settings) -> dict[str, TransferBackend]:
+    ssh = s.ssh_conn()
     return {
         "ftps": FTPSBackend(s.ftps_host, s.ftps_port, s.ftps_user, s.ftps_password,
                             verify=s.ftps_verify, ca_file=s.ftps_ca_file),
-        "scp": SCPBackend(s.ssh_host, s.ssh_port, s.ssh_user, s.ssh_password, s.ssh_key_file),
-        "rsync": RsyncBackend(s.ssh_host, s.ssh_port, s.ssh_user, s.ssh_key_file),
-        "sftp": SFTPBackend(s.ssh_host, s.ssh_port, s.ssh_user, s.ssh_password, s.ssh_key_file),
+        "scp": SCPBackend(ssh),
+        "rsync": RsyncBackend(ssh),
+        "sftp": SFTPBackend(ssh),
     }
