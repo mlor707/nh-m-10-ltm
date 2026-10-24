@@ -26,10 +26,16 @@ def main() -> None:
     b.add_argument("--size-mb", type=int, default=5)
     b.add_argument("--protocols", nargs="*")
     sub.add_parser("audit-verify")
+    sub.add_parser("ssh-check", help="chẩn đoán máy chủ SSH và thử SCP/SFTP/rsync")
 
     a = p.parse_args()
     s = Settings.from_env()
 
+    if a.cmd == "ssh-check":
+        from . import sshcheck
+        rows = sshcheck.run(s)
+        print(sshcheck.format_report(rows))
+        raise SystemExit(0 if all(r["ok"] for r in rows) else 1)
     if a.cmd == "audit-verify":
         ok, bad = AuditLog(s.audit_path).verify()
         print("Audit log hợp lệ ✅" if ok else f"Audit log BỊ SỬA ❌ tại dòng {bad}")

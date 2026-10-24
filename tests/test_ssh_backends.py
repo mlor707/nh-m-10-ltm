@@ -8,7 +8,6 @@ from securetransfer.config import Settings
 from securetransfer.gateway import Gateway
 from securetransfer.transfer import build_backends
 from securetransfer.transfer.base import TransferError
-from securetransfer.transfer.rsync import RsyncBackend
 
 
 @pytest.fixture
@@ -17,16 +16,13 @@ def cfg(ssh_server, tmp_path):
     remote.mkdir()
     s = Settings(data_dir=str(tmp_path / "data"), remote_dir=str(remote),
                  ssh_host="127.0.0.1", ssh_port=ssh_server["port"],
-                 ssh_user=ssh_server["user"], ssh_key_file=ssh_server["key"])
+                 ssh_user=ssh_server["user"], ssh_key_file=ssh_server["key"],
+                 ssh_known_hosts=str(tmp_path / "known_hosts"))   # không đụng ~/.ssh/known_hosts của máy dev
     return s, remote
 
 
 def _backends(s):
-    b = build_backends(s)
-    # không ghi known_hosts của máy dev khi test
-    b["rsync"] = RsyncBackend(s.ssh_host, s.ssh_port, s.ssh_user, s.ssh_key_file,
-                              extra_ssh_opts="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no")
-    return b
+    return build_backends(s)
 
 
 @pytest.mark.parametrize("proto", ["scp", "sftp", "rsync"])

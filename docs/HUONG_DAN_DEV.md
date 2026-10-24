@@ -6,7 +6,7 @@ python -m venv .venv
 .venv\Scripts\activate          # Windows;  macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 copy .env.example .env          # macOS/Linux: cp .env.example .env
-python -m pytest -q             # phải xanh toàn bộ (34 test)
+python -m pytest -q             # phải xanh toàn bộ (56 test; test SSH tự bỏ qua nếu máy không có sshd)
 ```
 
 ## 2. Chạy thử nhanh (FTPS local)
@@ -31,10 +31,12 @@ SCP / SFTP / rsync cần một máy chủ SSH. Làm theo `docs/DUNG_SSH_DEV.md` 
 | `audit.py` | Audit log hash-chain + gửi Syslog | ✅ xong + test |
 | `auth.py` | RBAC + mức mật | ✅ cơ bản (users.json) |
 | `transfer/ftps.py` | FTPS | ✅ test end-to-end |
-| `transfer/scp.py`, `sftp.py`, `rsync.py` | SCP / SFTP / rsync | ✅ test với sshd thật (xem `tests/test_ssh_backends.py`) |
+| `transfer/scp.py`, `sftp.py`, `rsync.py` | SCP / SFTP / rsync | ✅ test với sshd thật (`tests/test_ssh_backends.py`) |
+| `transfer/_ssh.py` | Kết nối SSH: strict host key, timeout, báo lỗi dễ hiểu | ✅ test (`tests/test_ssh_strict.py`) |
+| `sshcheck.py` | Lệnh `ssh-check` chẩn đoán máy chủ SSH | ✅ test |
 | `gateway.py` | Kiểm quyền → mã hóa → chọn giao thức → truyền → audit | ✅ |
 | `benchmark.py` | So sánh giao thức | ⚠️ đo được 1 file/1 lần, chưa có nhiều cỡ file, lặp lại, CPU/RAM |
-| `devssh.py`, `docker/` | Tạo khóa + máy chủ SSH dev | ✅ keygen đã chạy; ⚠️ Docker chưa chạy thử |
+| `devssh.py`, `docker/` | Tạo khóa, tin cậy máy chủ (`trust-host`), máy chủ SSH dev | ✅ đã chạy với sshd thật; ⚠️ `docker compose up` chưa chạy thử |
 | `api.py` | REST API + phục vụ giao diện | ✅ test end-to-end; ⚠️ đăng nhập demo bằng header |
 | `web/index.html` | Giao diện: gửi, tải về, audit, so sánh giao thức | ✅ 1 file HTML/JS thuần, dễ sửa |
 | `devserver.py` | FTPS server giả lập | ✅ |
