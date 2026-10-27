@@ -81,4 +81,17 @@ def test_benchmark_all_ssh_protocols(cfg):
     assert [r["protocol"] for r in rows] == ["scp", "sftp", "rsync"]
     assert all(r.get("intact") is True for r in rows), rows
     assert all(r["upload_s"] > 0 for r in rows)
-    assert (remote / "bench_scp.bin").exists()      # file đo nằm trong remote_dir, không rơi vào home
+    assert list(remote.iterdir()) == []             # file đo đã được dọn khỏi máy chủ
+
+
+@pytest.mark.parametrize("proto", ["scp", "sftp", "rsync"])
+def test_delete_remote_file(cfg, tmp_path, proto):
+    s, remote = cfg
+    b = _backends(s)[proto]
+    src = tmp_path / "x.bin"; src.write_bytes(b"abc")
+    b.upload(str(src), str(remote / "x.bin"))
+    assert (remote / "x.bin").exists()
+    b.delete(str(remote / "x.bin"))
+    assert not (remote / "x.bin").exists()
+    with pytest.raises(TransferError):
+        b.delete(str(remote / "x.bin"))             # xóa file không tồn tại phải báo lỗi

@@ -34,3 +34,13 @@ class SCPBackend(TransferBackend):
                 c.close()
         except (SCPException, paramiko.SSHException, OSError) as e:
             raise TransferError(f"SCP download lỗi: {friendly(e)}") from e
+
+    def delete(self, remote_path):
+        try:
+            c = open_ssh(self.conn)
+            try:
+                c.open_sftp().remove(remote_path)
+            finally:
+                c.close()
+        except (paramiko.SSHException, OSError) as e:
+            raise TransferError(f"SCP delete lỗi: {friendly(e)}") from e

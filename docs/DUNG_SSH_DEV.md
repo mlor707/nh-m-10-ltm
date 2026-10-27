@@ -52,8 +52,8 @@ python -m securetransfer.cli receive --user alice --level SECRET --scenario admi
 # Gửi qua rsync (scenario sync) hoặc SFTP (scenario baseline)
 python -m securetransfer.cli send --user alice --scenario sync hopdong.pdf
 
-# So sánh tốc độ ba giao thức
-python -m securetransfer.cli benchmark --size-mb 5 --protocols scp sftp rsync
+# So sánh tốc độ ba giao thức (in bảng và ghi file CSV; mỗi lần đo xong, file thử trên máy chủ được xóa)
+python -m securetransfer.cli benchmark --sizes 1 10 50 --repeat 3 --protocols scp sftp rsync --csv data/benchmark.csv
 ```
 Hoặc mở giao diện web, tab **So sánh giao thức**.
 
