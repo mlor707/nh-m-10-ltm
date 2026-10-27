@@ -4,7 +4,9 @@ import shlex
 import shutil
 import subprocess
 
-from ._ssh import SSHConn
+import paramiko
+
+from ._ssh import SSHConn, friendly, host_entry, open_ssh
 from .base import TransferBackend, TransferError
 
 
@@ -36,8 +38,11 @@ class RsyncBackend(TransferBackend):
         if proc.returncode != 0:
             err = proc.stderr.strip()
             if "Host key verification failed" in err:
-                err = ("Máy chủ chưa được tin cậy hoặc khóa đã đổi (chế độ strict). "
-                       "Chạy:  python -m securetransfer.devssh trust-host.  " + err)
+                c = self.conn
+                err = ("Không xác minh được khóa máy chủ (chưa tin cậy hoặc đã thay đổi). "
+                       "Chạy: python -m securetransfer.devssh trust-host. Nếu máy chủ Docker vừa được tạo lại: "
+                       f"ssh-keygen -R \"{host_entry(c.host, c.port)}\" "
+                       "(thêm -f <file> nếu bạn dùng ST_SSH_KNOWN_HOSTS). Chi tiết từ ssh: " + err)
             raise TransferError(f"rsync lỗi ({proc.returncode}): {err}")
 
     def upload(self, local_path, remote_path):
@@ -45,3 +50,13 @@ class RsyncBackend(TransferBackend):
 
     def download(self, remote_path, local_path):
         self._run(f"{self.conn.username}@{self.conn.host}:{remote_path}", local_path)
+
+    def delete(self, remote_path):
+        try:
+            c = open_ssh(self.conn)
+            try:
+                c.open_sftp().remove(remote_path)
+            finally:
+                c.close()
+        except (paramiko.SSHException, OSError) as e:
+            raise TransferError(f"rsync delete lỗi: {friendly(e)}") from e

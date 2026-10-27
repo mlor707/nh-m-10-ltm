@@ -2,6 +2,7 @@
 from __future__ import annotations
 import argparse
 import json
+import sys
 
 from .audit import AuditLog
 from .auth import Level, UserStore
@@ -22,9 +23,13 @@ def main() -> None:
     sub.choices["receive"].add_argument("remote_name")
     sub.choices["receive"].add_argument("dest")
 
-    b = sub.add_parser("benchmark")
-    b.add_argument("--size-mb", type=int, default=5)
-    b.add_argument("--protocols", nargs="*")
+    b = sub.add_parser("benchmark", help="so sánh tốc độ các giao thức")
+    b.add_argument("--sizes", type=int, nargs="+", help="các cỡ file (MB), mặc định: 1 10 50")
+    b.add_argument("--size-mb", type=int, help="một cỡ duy nhất (cách viết cũ)")
+    b.add_argument("--repeat", type=int, default=3, help="số lần lặp mỗi cỡ (mặc định 3)")
+    b.add_argument("--protocols", nargs="*", help="ftps scp rsync sftp (mặc định: tất cả)")
+    b.add_argument("--csv", help="ghi kết quả ra file CSV")
+    b.add_argument("--json", action="store_true", help="in JSON thay vì bảng")
     sub.add_parser("audit-verify")
     sub.add_parser("ssh-check", help="chẩn đoán máy chủ SSH và thử SCP/SFTP/rsync")
 
@@ -41,7 +46,20 @@ def main() -> None:
         print("Audit log hợp lệ ✅" if ok else f"Audit log BỊ SỬA ❌ tại dòng {bad}")
     elif a.cmd == "benchmark":
         from . import benchmark
-        print(json.dumps(benchmark.run(s, a.size_mb, a.protocols), indent=2, ensure_ascii=False))
+        sizes = a.sizes or ([a.size_mb] if a.size_mb else list(benchmark.DEFAULT_SIZES))
+
+        def progress(name, size, i, n):
+            print(f"  đang đo {name} {size} MB, lần {i}/{n}...", file=sys.stderr)
+
+        try:
+            rows = benchmark.run_matrix(s, sizes, a.repeat, a.protocols, progress)
+        except ValueError as e:
+            p.error(str(e))
+        print(json.dumps(rows, indent=2, ensure_ascii=False) if a.json else benchmark.format_table(rows))
+        if a.csv:
+            benchmark.write_csv(rows, a.csv)
+            print(f"\nĐã ghi {a.csv}", file=sys.stderr)
+        raise SystemExit(0 if any("error" not in r for r in rows) else 1)
     else:
         user = UserStore(s.users_path).get(a.user)
         gw = Gateway(s)

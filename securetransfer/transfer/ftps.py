@@ -48,3 +48,13 @@ class FTPSBackend(TransferBackend):
                 ftp.close()
         except all_errors as e:
             raise TransferError(f"FTPS download lỗi: {e}") from e
+
+    def delete(self, remote_path):
+        try:
+            ftp = self._connect()
+            try:
+                ftp.delete(remote_path)
+            finally:
+                ftp.close()
+        except all_errors as e:
+            raise TransferError(f"FTPS delete lỗi: {e}") from e
