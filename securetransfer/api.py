@@ -18,7 +18,7 @@ from .audit import AuditLog
 from .auth import PERMISSIONS, AuthError, Level, TokenManager, User, UserStore, authorize
 from .config import Settings
 from .crypto import CryptoError
-from .gateway import SCENARIO_PROTOCOL, Gateway
+from .gateway import SCENARIO_PROTOCOL, ConflictError, Gateway
 from .transfer import TransferError
 
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
@@ -72,7 +72,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         latest: dict[str, dict] = {}
         for e in audit().read_all():
             if e["action"] == "send" and e["status"] == "ok":
-                latest[e["target"]] = {
+                latest[Gateway.document_key(e["target"])] = {
                     "name": e["target"], "level": e["details"].get("level", "SECRET"),
                     "protocol": e["details"].get("protocol", ""), "sender": e["user"], "ts": e["ts"],
                 }
@@ -137,6 +137,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                         level=Level[level], scenario=scenario)
             except AuthError as e:
                 raise HTTPException(403, str(e))
+            except ConflictError as e:
+                raise HTTPException(409, str(e))
             except (TransferError, ValueError) as e:
                 raise HTTPException(502, str(e))
         return {"stored_as": remote, "protocol": SCENARIO_PROTOCOL[scenario], "level": level}

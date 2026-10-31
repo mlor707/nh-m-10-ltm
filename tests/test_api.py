@@ -129,3 +129,27 @@ def test_denied_attempts_are_audited(client):
     denials = [(e["user"], e["action"], e["status"]) for e in log if e["status"] == "denied"]
     assert denials == [("bob", "send", "denied"), ("bob", "audit", "denied")]
     assert c.get("/audit/verify", headers=headers["carol"]).json()["valid"] is True
+
+
+# ---------- Chống ghi đè / hạ mức mật (409) ----------
+def test_overwriting_secret_document_by_lower_clearance_returns_409(client):
+    c, root, headers = client
+    assert _send(c, headers["alice"], "tuyet-mat.txt", b"top secret", level="SECRET").status_code == 200
+    stored = (root / "tuyet-mat.txt.enc").read_bytes()
+    r = _send(c, headers["bob"], "tuyet-mat.txt", b"gia mao", level="INTERNAL")
+    assert r.status_code == 409
+    assert (root / "tuyet-mat.txt.enc").read_bytes() == stored          # file trên máy chủ không đổi
+    assert c.get("/documents/tuyet-mat.txt/download", headers=headers["alice"]).content == b"top secret"
+    assert c.get("/documents", headers=headers["bob"]).json() == []     # bob vẫn không thấy tài liệu mật
+    denied = [(e["user"], e["action"], e["status"]) for e in c.get("/audit", headers=headers["carol"]).json()
+              if e["status"] == "denied"]
+    assert denied == [("bob", "send", "denied")]
+
+
+def test_lowering_level_by_overwrite_returns_409(client):
+    c, _, headers = client
+    assert _send(c, headers["alice"], "a.txt", b"v1", level="SECRET").status_code == 200
+    assert _send(c, headers["alice"], "a.txt", b"v2", level="INTERNAL").status_code == 409
+    docs = c.get("/documents", headers=headers["alice"]).json()
+    assert [(d["name"], d["level"]) for d in docs] == [("a.txt", "SECRET")]
+    assert _send(c, headers["alice"], "a.txt", b"v3", level="SECRET").status_code == 200   # cùng mức vẫn được cập nhật
