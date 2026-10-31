@@ -1,5 +1,5 @@
 {
-  "alice": {"role": "admin",   "clearance": "SECRET",       "password_hash": null},
-  "bob":   {"role": "staff",   "clearance": "INTERNAL",     "password_hash": null},
-  "carol": {"role": "auditor", "clearance": "CONFIDENTIAL", "password_hash": null}
+  "alice": {"role": "admin",   "clearance": "SECRET"},
+  "bob":   {"role": "staff",   "clearance": "INTERNAL"},
+  "carol": {"role": "auditor", "clearance": "CONFIDENTIAL"}
 }

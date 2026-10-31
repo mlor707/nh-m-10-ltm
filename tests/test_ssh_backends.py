@@ -63,13 +63,13 @@ def test_gateway_end_to_end(cfg, tmp_path, monkeypatch, scenario, proto):
     gw = Gateway(s, backends=_backends(s))
     alice = User("alice", Role.ADMIN, Level.SECRET)
     doc = tmp_path / "so-sach.txt"
-    doc.write_text("Sổ sách kế toán 2026", encoding="utf-8")
+    doc.write_text("Sổ sách kế toán 2026")
     gw.send(alice, str(doc), level=Level.CONFIDENTIAL, scenario=scenario)
     stored = (remote / "so-sach.txt.enc").read_bytes()
     assert "Sổ sách".encode() not in stored            # trên máy chủ chỉ có bản mã hóa
     out = tmp_path / "out.txt"
     gw.receive(alice, "so-sach.txt", str(out), level=Level.CONFIDENTIAL, scenario=scenario)
-    assert out.read_text(encoding="utf-8") == "Sổ sách kế toán 2026"
+    assert out.read_text() == "Sổ sách kế toán 2026"
     assert gw.audit.read_all()[0]["details"]["protocol"] == proto
     assert gw.audit.verify() == (True, None)
 
