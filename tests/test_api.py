@@ -1,6 +1,8 @@
 """Kiểm thử API + giao diện, đi qua toàn bộ luồng: web -> gateway -> FTPS -> giải mã."""
 import json
+import time
 
+import jwt
 import pytest
 from fastapi.testclient import TestClient
 
@@ -153,3 +155,152 @@ def test_lowering_level_by_overwrite_returns_409(client):
     docs = c.get("/documents", headers=headers["alice"]).json()
     assert [(d["name"], d["level"]) for d in docs] == [("a.txt", "SECRET")]
     assert _send(c, headers["alice"], "a.txt", b"v3", level="SECRET").status_code == 200   # cùng mức vẫn được cập nhật
+
+
+# ---------- Token đăng nhập hết hạn ----------
+def test_expired_token_rejected(client):
+    c, _, _ = client
+    now = int(time.time())
+    expired = jwt.encode({"iss": "securetransfer", "sub": "bob", "iat": now - 7200, "exp": now - 3600},
+                         "test-only-secret-key-with-at-least-32-bytes", algorithm="HS256")
+    assert c.get("/me", headers={"Authorization": f"Bearer {expired}"}).status_code == 401
+
+
+# ---------- Link chia sẻ có thời hạn ----------
+def _share(c, who, name, **body):
+    return c.post(f"/documents/{name}/share", headers=who, json=body)
+
+
+def _audit(c, headers):
+    return c.get("/audit", headers=headers["carol"]).json()
+
+
+def test_share_requires_login_and_valid_body(client):
+    c, _, headers = client
+    _send(c, headers["bob"], "a.txt", b"a")
+    assert c.post("/documents/a.txt/share", json={"expires_minutes": 30, "max_downloads": 3}).status_code == 401
+    assert _share(c, headers["bob"], "a.txt", expires_minutes=0, max_downloads=3).status_code == 422
+    assert _share(c, headers["bob"], "a.txt", expires_minutes=30, max_downloads=0).status_code == 422
+    assert _share(c, headers["bob"], "khong-co.txt", expires_minutes=30, max_downloads=3).status_code == 404
+    assert _share(c, headers["carol"], "a.txt", expires_minutes=30, max_downloads=3).status_code == 403
+
+
+def test_share_valid_link_downloads_without_login_and_is_audited(client):
+    c, _, headers = client
+    _send(c, headers["bob"], "hop-dong.txt", "Hợp đồng NDA".encode())
+    r = _share(c, headers["bob"], "hop-dong.txt", expires_minutes=30, max_downloads=3)
+    assert r.status_code == 200
+    token = r.json()["token"]
+    assert r.json()["max_downloads"] == 3 and r.json()["url"] == f"/share/{token}"
+
+    d = c.get(f"/share/{token}")  # không gửi Authorization
+    assert d.status_code == 200 and d.content == "Hợp đồng NDA".encode()
+
+    log = _audit(c, headers)
+    assert any(e["action"] == "share_create" and e["status"] == "ok" and e["user"] == "bob" for e in log)
+    dl = [e for e in log if e["action"] == "share_download" and e["status"] == "ok"]
+    assert len(dl) == 1 and dl[0]["target"] == "hop-dong.txt" and dl[0]["details"]["downloads"] == 1
+    assert token not in json.dumps(log)  # token gốc không bao giờ nằm trong nhật ký
+    assert c.get("/audit/verify", headers=headers["carol"]).json()["valid"] is True
+
+
+def test_share_expired_returns_410(client):
+    c, _, headers = client
+    _send(c, headers["bob"], "a.txt", b"a")
+    token = _share(c, headers["bob"], "a.txt", expires_minutes=30, max_downloads=3).json()["token"]
+    assert c.get(f"/share/{token}").status_code == 200
+    shares = c.app.state.shares
+    real_clock = shares.clock
+    shares.clock = lambda: time.time() + 31 * 60
+    try:
+        assert c.get(f"/share/{token}").status_code == 410
+    finally:
+        shares.clock = real_clock
+    denied = [e for e in _audit(c, headers) if e["action"] == "share_download" and e["status"] == "denied"]
+    assert len(denied) == 1 and "hết hạn" in denied[0]["details"]["error"]
+
+
+def test_share_over_download_limit_returns_410(client):
+    c, _, headers = client
+    _send(c, headers["bob"], "a.txt", b"a")
+    token = _share(c, headers["bob"], "a.txt", expires_minutes=30, max_downloads=2).json()["token"]
+    assert c.get(f"/share/{token}").status_code == 200
+    assert c.get(f"/share/{token}").status_code == 200
+    assert c.get(f"/share/{token}").status_code == 410
+    log = _audit(c, headers)
+    assert len([e for e in log if e["action"] == "share_download" and e["status"] == "ok"]) == 2
+    assert len([e for e in log if e["action"] == "share_download" and e["status"] == "denied"]) == 1
+
+
+def test_share_revoked_returns_410(client):
+    c, _, headers = client
+    _send(c, headers["bob"], "a.txt", b"a")
+    token = _share(c, headers["bob"], "a.txt", expires_minutes=30, max_downloads=5).json()["token"]
+    assert c.delete(f"/share/{token}").status_code == 401                         # cần đăng nhập
+    assert c.delete(f"/share/{token}", headers=headers["carol"]).status_code == 403  # không phải người tạo
+    assert c.delete(f"/share/{token}", headers=headers["bob"]).json() == {"revoked": True}
+    assert c.get(f"/share/{token}").status_code == 410
+    log = _audit(c, headers)
+    assert any(e["action"] == "share_revoke" and e["status"] == "ok" for e in log)
+    assert any(e["action"] == "share_revoke" and e["status"] == "denied" for e in log)
+
+
+def test_share_admin_can_revoke_others_link(client):
+    c, _, headers = client
+    _send(c, headers["bob"], "a.txt", b"a")
+    token = _share(c, headers["bob"], "a.txt", expires_minutes=30, max_downloads=5).json()["token"]
+    assert c.delete(f"/share/{token}", headers=headers["alice"]).status_code == 200
+    assert c.get(f"/share/{token}").status_code == 410
+
+
+def test_share_secret_document_refused_and_audited(client):
+    c, _, headers = client
+    _send(c, headers["alice"], "tuyet-mat.txt", b"top secret", level="SECRET")
+    assert _share(c, headers["alice"], "tuyet-mat.txt", expires_minutes=30, max_downloads=3).status_code == 403
+    assert _share(c, headers["bob"], "tuyet-mat.txt", expires_minutes=30, max_downloads=3).status_code == 404
+    denied = [e for e in _audit(c, headers) if e["action"] == "share_create" and e["status"] == "denied"]
+    assert [e["user"] for e in denied] == ["alice"]
+
+
+def test_share_unknown_token_returns_404(client):
+    c, _, headers = client
+    assert c.get("/share/khong-ton-tai").status_code == 404
+    assert c.delete("/share/khong-ton-tai", headers=headers["bob"]).status_code == 404
+
+
+def test_share_only_sender_or_admin_can_create(client):
+    c, _, headers = client
+    _send(c, headers["alice"], "cua-alice.txt", b"a")           # INTERNAL, gửi bởi alice
+    assert _share(c, headers["bob"], "cua-alice.txt", expires_minutes=30, max_downloads=1).status_code == 403
+    assert _share(c, headers["alice"], "cua-alice.txt", expires_minutes=30, max_downloads=1).status_code == 200
+    _send(c, headers["bob"], "cua-bob.txt", b"b")
+    assert _share(c, headers["alice"], "cua-bob.txt", expires_minutes=30, max_downloads=1).status_code == 200  # admin
+    denied = [e for e in _audit(c, headers) if e["action"] == "share_create" and e["status"] == "denied"]
+    assert [e["user"] for e in denied] == ["bob"]
+
+
+def test_share_link_dies_when_document_is_replaced(client):
+    c, _, headers = client
+    _send(c, headers["bob"], "a.txt", b"ban cu")
+    token = _share(c, headers["bob"], "a.txt", expires_minutes=30, max_downloads=5).json()["token"]
+    assert c.get(f"/share/{token}").content == b"ban cu"
+    assert _send(c, headers["bob"], "a.txt", b"ban moi").status_code == 200      # chủ tài liệu cập nhật
+    r = c.get(f"/share/{token}")
+    assert r.status_code == 410 and b"ban moi" not in r.content
+    denied = [e for e in _audit(c, headers) if e["action"] == "share_download" and e["status"] == "denied"]
+    assert len(denied) == 1 and "cập nhật" in denied[0]["details"]["error"]
+
+
+def test_share_link_never_serves_a_document_raised_to_secret(client):
+    c, _, headers = client
+    _send(c, headers["alice"], "x.txt", b"noi bo", level="INTERNAL")
+    token = _share(c, headers["alice"], "x.txt", expires_minutes=30, max_downloads=5).json()["token"]
+    assert _send(c, headers["alice"], "x.txt", b"gio la tuyet mat", level="SECRET").status_code == 200
+    r = c.get(f"/share/{token}")
+    assert r.status_code == 410 and b"tuyet mat" not in r.content
+
+
+def test_documents_listing_does_not_leak_internal_version_field(client):
+    c, _, headers = client
+    _send(c, headers["bob"], "a.txt", b"a")
+    assert set(c.get("/documents", headers=headers["bob"]).json()[0]) == {"name", "level", "protocol", "sender", "ts"}

@@ -15,10 +15,11 @@ from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
 from .audit import AuditLog
-from .auth import PERMISSIONS, AuthError, Level, TokenManager, User, UserStore, authorize
+from .auth import PERMISSIONS, AuthError, Level, Role, TokenManager, User, UserStore, authorize
 from .config import Settings
 from .crypto import CryptoError
 from .gateway import SCENARIO_PROTOCOL, ConflictError, Gateway
+from .shares import ShareError, ShareStore
 from .transfer import TransferError
 
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
@@ -31,6 +32,11 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=1024)
 
 
+class ShareRequest(BaseModel):
+    expires_minutes: int = Field(default=30, ge=1, le=7 * 24 * 60)
+    max_downloads: int = Field(default=1, ge=1, le=100)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     app = FastAPI(title="Secure Internal Document Transfer", version="0.2.0")
@@ -39,6 +45,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     audit_log = AuditLog.from_settings(settings)  # MỘT instance cho cả API và Gateway (khóa, Syslog, HMAC dùng chung)
     app.state.audit = audit_log
     holder: dict[str, Gateway] = {}
+    shares = ShareStore(os.path.join(settings.data_dir, "shares.json"))
+    app.state.shares = shares
 
     def gateway() -> Gateway:
         if "gw" not in holder:
@@ -77,6 +85,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 latest[Gateway.document_key(e["target"])] = {
                     "name": e["target"], "level": e["details"].get("level", "SECRET"),
                     "protocol": e["details"].get("protocol", ""), "sender": e["user"], "ts": e["ts"],
+                    "version": e["hash"],
                 }
         docs = [d for d in latest.values() if Level[d["level"]] <= user.clearance]
         return sorted(docs, key=lambda d: d["ts"], reverse=True)
@@ -148,7 +157,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/documents")
     def documents(user: User = Depends(current_user)):
         require(user, "receive")
-        return visible_documents(user)
+        return [{k: v for k, v in d.items() if k != "version"} for d in visible_documents(user)]
+
+    def current_version(name: str) -> str | None:
+        """Mã phiên bản (hash dòng audit) của lần gửi mới nhất của tài liệu; None nếu chưa từng gửi."""
+        key = Gateway.document_key(name)
+        last = None
+        for e in audit().read_all():
+            if e["action"] == "send" and e["status"] == "ok" and Gateway.document_key(e["target"]) == key:
+                last = e["hash"]
+        return last
 
     @app.get("/documents/{name}/download")
     def download_document(name: str, user: User = Depends(current_user)):
@@ -169,6 +187,80 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(502, str(e))
         return FileResponse(dest, filename=name,
                             background=BackgroundTask(shutil.rmtree, tmp, ignore_errors=True))
+
+    # ---------- Link chia sẻ có thời hạn ----------
+    @app.post("/documents/{name}/share")
+    def create_share(name: str, body: ShareRequest, user: User = Depends(current_user)):
+        require(user, "send", Level.PUBLIC, name)
+        doc = next((d for d in visible_documents(user) if d["name"] == name), None)
+        if doc is None:
+            raise HTTPException(404, "Không tìm thấy tài liệu (hoặc bạn không đủ cấp độ để mở)")
+        level = Level[doc["level"]]
+        if level >= Level.SECRET:
+            msg = "Không được tạo link chia sẻ cho tài liệu mức SECRET"
+            audit().record(user.username, "share_create", name, "denied", {"level": level.name, "error": msg})
+            raise HTTPException(403, msg)
+        if doc["sender"] != user.username and user.role != Role.ADMIN:
+            msg = "Chỉ người gửi tài liệu hoặc quản trị viên mới được tạo link chia sẻ"
+            audit().record(user.username, "share_create", name, "denied", {"level": level.name, "error": msg})
+            raise HTTPException(403, msg)
+        scenario = PROTOCOL_TO_SCENARIO.get(doc["protocol"], "partner")
+        token, share = shares.create(name, level.name, scenario, user.username,
+                                     body.expires_minutes, body.max_downloads, version=doc["version"])
+        audit().record(user.username, "share_create", name, "ok", {
+            "share_id": share["id"], "level": level.name,
+            "expires_minutes": body.expires_minutes, "max_downloads": body.max_downloads})
+        return {"token": token, "url": f"/share/{token}", "expires_at": share["expires_at"],
+                "max_downloads": share["max_downloads"]}
+
+    @app.get("/share/{token}")
+    def download_share(token: str):
+        """Không cần đăng nhập: người giữ link được tải. Mọi lần dùng, kể cả bị từ chối, đều ghi audit."""
+        try:
+            share = shares.get(token)
+        except ShareError as e:
+            audit().record("anonymous", "share_download", "-", "denied", {"error": str(e)})
+            raise HTTPException(e.status, str(e))
+        viewer = User(f"share:{share['id']}", Role.STAFF, Level[share["level"]])
+        if current_version(share["doc"]) != share["version"]:
+            msg = "Tài liệu đã được cập nhật hoặc thay thế, link này không còn hiệu lực"
+            audit().record(viewer.username, "share_download", share["doc"], "denied", {"error": msg})
+            raise HTTPException(410, msg)
+        try:
+            share = shares.consume(token)
+        except ShareError as e:
+            audit().record(viewer.username, "share_download", share["doc"], "denied", {"error": str(e)})
+            raise HTTPException(e.status, str(e))
+        tmp = tempfile.mkdtemp()
+        dest = os.path.join(tmp, "plain.bin")
+        try:
+            gateway().receive(viewer, share["doc"], dest, level=Level[share["level"]],
+                              scenario=share["scenario"])
+        except (AuthError, TransferError, CryptoError) as e:
+            shutil.rmtree(tmp, ignore_errors=True)
+            shares.refund(token)  # lỗi phía máy chủ thì không tính vào số lần tải của người dùng
+            audit().record(viewer.username, "share_download", share["doc"], "error", {"error": str(e)})
+            raise HTTPException(502, str(e))
+        audit().record(viewer.username, "share_download", share["doc"], "ok", {
+            "share_id": share["id"], "created_by": share["created_by"],
+            "downloads": share["downloads"], "max_downloads": share["max_downloads"]})
+        return FileResponse(dest, filename=share["doc"],
+                            background=BackgroundTask(shutil.rmtree, tmp, ignore_errors=True))
+
+    @app.delete("/share/{token}")
+    def revoke_share(token: str, user: User = Depends(current_user)):
+        try:
+            share = shares.get(token)
+        except ShareError as e:
+            raise HTTPException(e.status, str(e))
+        if share["created_by"] != user.username and user.role != Role.ADMIN:
+            msg = "Chỉ người tạo link hoặc quản trị viên mới được thu hồi"
+            audit().record(user.username, "share_revoke", share["doc"], "denied",
+                           {"share_id": share["id"], "error": msg})
+            raise HTTPException(403, msg)
+        shares.revoke(token)
+        audit().record(user.username, "share_revoke", share["doc"], "ok", {"share_id": share["id"]})
+        return {"revoked": True}
 
     # ---------- Kiểm toán & so sánh ----------
     @app.get("/audit")

@@ -407,7 +407,7 @@ async function loadAudit() {
   try {
     const rows = (await (await api("/audit")).json()).reverse().slice(0, 200);
     if (!rows.length) return $("auditBox").replaceChildren(h("div", { class: "empty" }, "Chưa có hoạt động nào được ghi lại."));
-    const act = { send: "Gửi", receive: "Nhận" }, st = { ok: "Thành công", denied: "Bị từ chối", error: "Lỗi" };
+    const act = { send: "Gửi", receive: "Nhận", login: "Đăng nhập", share_create: "Tạo link chia sẻ", share_download: "Tải qua link", share_revoke: "Thu hồi link" }, st = { ok: "Thành công", denied: "Bị từ chối", error: "Lỗi" };
     $("auditBox").replaceChildren(h("table", {},
       h("thead", {}, h("tr", {}, ...["Thời gian", "Người dùng", "Hành động", "Tài liệu", "Giao thức", "Kết quả"].map((t) => h("th", {}, t)))),
       h("tbody", {}, ...rows.map((r) => h("tr", {},
