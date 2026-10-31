@@ -17,7 +17,7 @@ GENESIS = "0" * 64
 class AuditLog:
     def __init__(self, path: str, syslog_address: tuple[str, int] | None = None):
         self.path = path
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # RLock: record() gọi read_all() khi đang giữ khóa
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         self._logger = None
         if syslog_address:  # Giao thức Syslog
@@ -54,10 +54,11 @@ class AuditLog:
         return entry
 
     def read_all(self) -> list[dict]:
-        if not os.path.exists(self.path):
-            return []
-        with open(self.path, encoding="utf-8") as f:
-            return [json.loads(l) for l in f if l.strip()]
+        with self._lock:  # không đọc phải dòng đang được ghi dở bởi luồng khác
+            if not os.path.exists(self.path):
+                return []
+            with open(self.path, encoding="utf-8") as f:
+                return [json.loads(l) for l in f if l.strip()]
 
     def verify(self) -> tuple[bool, int | None]:
         """Trả về (hợp lệ?, số dòng lỗi đầu tiên – đếm từ 1)."""
