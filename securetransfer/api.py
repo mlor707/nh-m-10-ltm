@@ -36,15 +36,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Secure Internal Document Transfer", version="0.2.0")
     users = UserStore(settings.users_path)
     tokens = TokenManager(settings.jwt_secret) if settings.jwt_secret else None
+    audit_log = AuditLog.from_settings(settings)  # MỘT instance cho cả API và Gateway (khóa, Syslog, HMAC dùng chung)
+    app.state.audit = audit_log
     holder: dict[str, Gateway] = {}
 
     def gateway() -> Gateway:
         if "gw" not in holder:
-            holder["gw"] = Gateway(settings)
+            holder["gw"] = Gateway(settings, audit=audit_log)
         return holder["gw"]
 
     def audit() -> AuditLog:
-        return AuditLog(settings.audit_path)
+        return audit_log
 
     def current_user(authorization: str | None = Header(default=None)) -> User:
         if not authorization:
