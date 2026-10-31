@@ -21,7 +21,7 @@ def test_send_receive_roundtrip(env, tmp_path):
     gw = Gateway(s)
     user = User("alice", Role.ADMIN, Level.SECRET)
     doc = tmp_path / "hopdong.txt"
-    doc.write_text("Hợp đồng M&A tuyệt mật")
+    doc.write_text("Hợp đồng M&A tuyệt mật", encoding="utf-8")
     gw.send(user, str(doc), level=Level.SECRET, scenario="partner")
 
     stored = (root / "hopdong.txt.enc").read_bytes()
@@ -29,7 +29,7 @@ def test_send_receive_roundtrip(env, tmp_path):
 
     out = tmp_path / "out.txt"
     gw.receive(user, "hopdong.txt", str(out), level=Level.SECRET)
-    assert out.read_text() == "Hợp đồng M&A tuyệt mật"
+    assert out.read_text(encoding="utf-8") == "Hợp đồng M&A tuyệt mật"
     assert gw.audit.verify() == (True, None)
     assert [e["action"] for e in gw.audit.read_all()] == ["send", "receive"]
 

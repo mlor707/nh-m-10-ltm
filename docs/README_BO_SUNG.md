@@ -27,7 +27,20 @@ pip install -r requirements.txt
 python -m pytest -q             # test SSH tự bỏ qua nếu máy không có sshd
 ```
 
-**Chạy giao diện web** (dùng máy chủ FTPS giả lập, không cần Docker). Mở hai cửa sổ terminal:
+**Chạy giao diện web** (dùng máy chủ FTPS giả lập, không cần Docker). Trước khi chạy, tạo `.env` từ `.env.example`,
+đặt `ST_JWT_SECRET` thành giá trị ngẫu nhiên dài ít nhất 32 byte, rồi đặt mật khẩu cho từng tài khoản:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+python -m securetransfer.auth set-password alice
+python -m securetransfer.auth set-password bob
+python -m securetransfer.auth set-password carol
+```
+
+Mỗi lệnh sẽ hỏi mật khẩu (tối thiểu 12 ký tự) hai lần và lưu hash scrypt trong `config/users.json`.
+Không dùng lại mật khẩu cá nhân; không chia sẻ `ST_JWT_SECRET`.
+
+Mở hai cửa sổ terminal:
 
 ```bash
 # Cửa sổ 1: máy chủ FTPS giả lập
@@ -36,7 +49,7 @@ python -m securetransfer.devserver
 # Cửa sổ 2: ứng dụng
 uvicorn securetransfer.api:app --reload
 ```
-Mở http://127.0.0.1:8000, chọn người dùng alice, bob hoặc carol ở góc trái (chế độ demo, chưa cần mật khẩu).
+Mở http://127.0.0.1:8000 và đăng nhập bằng một tài khoản đã đặt mật khẩu. Phiên JWT hết hạn sau 60 phút.
 
 **Thử SCP, SFTP, rsync** cần một máy chủ SSH. Làm theo [docs/DUNG_SSH_DEV.md](docs/DUNG_SSH_DEV.md), sau đó:
 
@@ -61,7 +74,7 @@ Tiến độ (tick khi đã merge vào `main`):
 - [x] Máy chủ SSH dev bằng Docker, lệnh `ssh-check`, chế độ strict host key, `trust-host`
 - [x] Benchmark nhiều cỡ file, lặp nhiều lần, xuất CSV
 - [ ] Số đo thật và hoàn thiện `docs/SO_SANH_GIAO_THUC.md` (Người 1)
-- [ ] Đăng nhập bằng mật khẩu và JWT (Người 2)
+- [x] Đăng nhập bằng mật khẩu scrypt và JWT bearer (Người 2)
 - [ ] Link chia sẻ có thời hạn (Người 2)
 - [ ] Màn hình đăng nhập, thanh tiến trình upload (Người 3)
 - [ ] GitHub Actions chạy test, Dockerfile cho ứng dụng (Người 3)

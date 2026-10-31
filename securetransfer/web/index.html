@@ -38,6 +38,10 @@ body { font-family: var(--sans); background: var(--bg); color: var(--ink); font-
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 
 .app { display: grid; grid-template-columns: 260px 1fr; min-height: 100%; }
+.app[hidden], #loginScreen[hidden] { display: none; }
+.login-page { min-height: 100%; display: grid; place-items: center; padding: 20px; }
+.login-page .panel { width: min(100%, 440px); }
+.login-page h1 { margin-bottom: 8px; }
 aside { background: var(--side); color: var(--side-ink); padding: 24px 18px; display: flex; flex-direction: column; gap: 28px; }
 .brand { font-family: var(--serif); font-size: 20px; line-height: 1.25; }
 .brand small { display: block; font-family: var(--sans); font-size: 12.5px; color: #9fb0bf; margin-top: 6px; }
@@ -101,22 +105,41 @@ td.mono { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
 </style>
 </head>
 <body>
-<div class="app">
+<section id="loginScreen" class="login-page" hidden>
+  <div class="panel">
+    <h1>Đăng nhập</h1>
+    <p class="sub">Nhập tài khoản và mật khẩu được cấp để tiếp tục.</p>
+    <form class="form" id="loginForm">
+      <div class="field">
+        <label for="loginUsername">Tên đăng nhập</label>
+        <input id="loginUsername" name="username" autocomplete="username" required maxlength="128">
+      </div>
+      <div class="field">
+        <label for="loginPassword">Mật khẩu</label>
+        <input id="loginPassword" name="password" type="password" autocomplete="current-password" required maxlength="1024">
+      </div>
+      <button class="btn" id="loginBtn" type="submit">Đăng nhập</button>
+    </form>
+    <div id="loginMsg" role="status"></div>
+  </div>
+</section>
+<div class="app" id="appShell" hidden>
   <aside>
-    <div class="brand">Truyền tải tài liệu nội bộ an toàn<small>Mọi tài liệu được mã hóa trước khi rời máy bạn</small></div>
+    <div class="brand">Truyền tải tài liệu nội bộ an toàn<small>Gateway mã hóa tài liệu trước khi lưu trữ</small></div>
     <div class="who">
-      <label for="user">Đăng nhập với tư cách</label>
-      <select id="user"></select>
+      <label>Đang đăng nhập</label>
+      <div id="whoName"></div>
       <div class="meta" id="whoMeta"></div>
+      <button class="btn ghost" id="logoutBtn" type="button">Đăng xuất</button>
     </div>
     <nav role="tablist" aria-label="Chức năng" id="nav"></nav>
-    <div class="demo-note">Chế độ demo: chọn người dùng không cần mật khẩu. Bản chính thức sẽ đăng nhập bằng LDAP/Kerberos.</div>
+    <div class="demo-note">Phiên đăng nhập sẽ tự hết hạn sau 60 phút.</div>
   </aside>
 
   <main>
     <section id="view-send" hidden>
       <h1>Gửi tài liệu</h1>
-      <p class="sub">Tài liệu được mã hóa AES-256 ngay trên máy bạn, rồi gửi đi bằng giao thức phù hợp với tình huống.</p>
+      <p class="sub">Gateway mã hóa tài liệu bằng AES-256-GCM trước khi gửi qua giao thức phù hợp với tình huống.</p>
       <div class="panel">
         <form class="form" id="sendForm">
           <div class="field">
@@ -196,10 +219,8 @@ const NAV = [
   { id: "audit", label: "Nhật ký kiểm toán",  perm: "audit" },
   { id: "bench", label: "So sánh giao thức",  perm: "benchmark" },
 ];
-const ROLE_VI = { admin: "Quản trị viên", staff: "Nhân viên", auditor: "Kiểm toán viên" };
-
 const $ = (id) => document.getElementById(id);
-const state = { me: null, protocols: {}, tab: null, file: null, level: "INTERNAL" };
+const state = { me: null, protocols: {}, tab: null, file: null, level: "INTERNAL", token: null };
 
 /* Tạo phần tử DOM an toàn (không dùng innerHTML với dữ liệu từ server) */
 function h(tag, attrs, ...kids) {
@@ -215,7 +236,14 @@ const levelChip = (l) => h("span", { class: "lv lv-" + l }, LEVEL_VI[l] || l);
 const fmtTime = (iso) => new Date(iso).toLocaleString("vi-VN");
 
 async function api(path, opts = {}) {
-  const res = await fetch(path, { ...opts, headers: { ...(opts.headers || {}), "X-Username": state.user } });
+  const headers = { ...(opts.headers || {}) };
+  if (state.token) headers.Authorization = "Bearer " + state.token;
+  const res = await fetch(path, { ...opts, headers });
+  if (res.status === 401 && path !== "/login") {
+    sessionStorage.removeItem("st_token");
+    state.token = null;
+    showLogin();
+  }
   if (!res.ok) {
     let detail = res.statusText;
     try { detail = (await res.json()).detail || detail; } catch (_) {}
@@ -225,21 +253,68 @@ async function api(path, opts = {}) {
 }
 function say(el, text, kind) { el.replaceChildren(text ? h("div", { class: "msg " + kind }, text) : ""); }
 
-/* ---------- Đăng nhập demo ---------- */
+/* ---------- Đăng nhập ---------- */
 async function init() {
   state.protocols = await (await fetch("/protocols")).json();
-  const users = await (await fetch("/users")).json();
-  const sel = $("user");
-  users.forEach((u) => sel.append(h("option", { value: u.username }, `${u.username} (${ROLE_VI[u.role] || u.role})`)));
-  state.user = localStorage.getItem("st_user");
-  if (!users.some((u) => u.username === state.user)) state.user = users[0].username;
-  sel.value = state.user;
-  sel.addEventListener("change", () => { state.user = sel.value; localStorage.setItem("st_user", state.user); loadMe(); });
-  await loadMe();
+  $("loginForm").addEventListener("submit", login);
+  $("logoutBtn").addEventListener("click", logout);
+  state.token = sessionStorage.getItem("st_token");
+  if (state.token) {
+    try {
+      await loadMe();
+      return;
+    } catch (_) {
+      sessionStorage.removeItem("st_token");
+      state.token = null;
+    }
+  }
+  showLogin();
+}
+
+function showLogin() {
+  $("appShell").hidden = true;
+  $("loginScreen").hidden = false;
+}
+
+function logout() {
+  sessionStorage.removeItem("st_token");
+  state.token = null;
+  state.me = null;
+  showLogin();
+}
+
+async function login(e) {
+  e.preventDefault();
+  const button = $("loginBtn");
+  button.disabled = true;
+  say($("loginMsg"), "Đang đăng nhập...", "ok");
+  try {
+    const response = await fetch("/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: $("loginUsername").value,
+        password: $("loginPassword").value,
+      }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || response.statusText);
+    state.token = result.access_token;
+    sessionStorage.setItem("st_token", state.token);
+    $("loginPassword").value = "";
+    await loadMe();
+  } catch (err) {
+    say($("loginMsg"), err.message, "err");
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function loadMe() {
   state.me = await (await api("/me")).json();
+  $("loginScreen").hidden = true;
+  $("appShell").hidden = false;
+  $("whoName").textContent = state.me.username;
   $("whoMeta").replaceChildren("Cấp độ tối đa:", levelChip(state.me.clearance));
   const tabs = NAV.filter((n) => state.me.permissions.includes(n.perm));
   const nav = $("nav");
@@ -367,7 +442,10 @@ $("benchBtn").addEventListener("click", async () => {
   finally { $("benchBtn").disabled = false; }
 });
 
-init().catch((e) => document.querySelector("main").prepend(h("div", { class: "msg err" }, "Không khởi động được: " + e.message)));
+init().catch((e) => {
+  showLogin();
+  say($("loginMsg"), "Không khởi động được: " + e.message, "err");
+});
 </script>
 </body>
 </html>

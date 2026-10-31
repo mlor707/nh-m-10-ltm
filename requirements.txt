@@ -5,6 +5,7 @@ fastapi>=0.110
 uvicorn>=0.29
 python-multipart>=0.0.9
 httpx>=0.27          # dùng cho test API
+PyJWT>=2.8
 pyftpdlib>=1.5.9     # FTPS server giả lập để dev/test
 pyOpenSSL>=24.0      # pyftpdlib cần cho TLS
 pytest>=8.0
