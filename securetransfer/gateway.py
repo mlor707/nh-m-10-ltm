@@ -29,9 +29,7 @@ class Gateway:
     def __init__(self, settings: Settings, audit: AuditLog | None = None,
                  backends: dict[str, TransferBackend] | None = None):
         self.s = settings
-        self.audit = audit or AuditLog(
-            settings.audit_path,
-            (settings.syslog_host, settings.syslog_port) if settings.syslog_host else None)
+        self.audit = audit or AuditLog.from_settings(settings)
         self.backends = backends or build_backends(settings)
         self.key = load_or_create_key(settings.key_path)
         self._locks_guard = threading.Lock()

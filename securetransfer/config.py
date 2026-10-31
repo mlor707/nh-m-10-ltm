@@ -42,6 +42,8 @@ class Settings:
     ssh_strict_host_key: bool = False   # True: chỉ tin máy chủ có trong known_hosts (nên bật khi chạy thật)
     ssh_known_hosts: str | None = None  # None: dùng ~/.ssh/known_hosts của hệ thống
     ssh_timeout: int = 20
+    # Nhật ký kiểm toán: đặt khóa (>= 32 byte) để dùng HMAC và chống sửa/xóa dòng cuối
+    audit_key: str | None = None
     # Syslog (tùy chọn)
     syslog_host: str | None = None
     syslog_port: int = 514
@@ -82,6 +84,7 @@ class Settings:
         s.ssh_strict_host_key = _bool(g("SSH_STRICT_HOST_KEY"), s.ssh_strict_host_key)
         s.ssh_known_hosts = g("SSH_KNOWN_HOSTS") or None
         s.ssh_timeout = int(g("SSH_TIMEOUT", s.ssh_timeout))
+        s.audit_key = g("AUDIT_KEY") or None
         s.syslog_host = g("SYSLOG_HOST")
         s.syslog_port = int(g("SYSLOG_PORT", s.syslog_port))
         return s

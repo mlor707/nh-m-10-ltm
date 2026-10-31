@@ -42,7 +42,7 @@ def main() -> None:
         print(sshcheck.format_report(rows))
         raise SystemExit(0 if all(r["ok"] for r in rows) else 1)
     if a.cmd == "audit-verify":
-        ok, bad = AuditLog(s.audit_path).verify()
+        ok, bad = AuditLog.from_settings(s).verify()
         print("Audit log hợp lệ ✅" if ok else f"Audit log BỊ SỬA ❌ tại dòng {bad}")
     elif a.cmd == "benchmark":
         from . import benchmark
