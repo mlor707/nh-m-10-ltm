@@ -24,6 +24,7 @@ def _bool(v: str | None, default: bool) -> bool:
 class Settings:
     data_dir: str = "data"
     users_path: str = "config/users.json"
+    jwt_secret: str | None = None
     remote_dir: str = "."
     # FTPS
     ftps_host: str = "127.0.0.1"
@@ -65,6 +66,7 @@ class Settings:
         s = cls()
         s.data_dir = g("DATA_DIR", s.data_dir)
         s.users_path = g("USERS_PATH", s.users_path)
+        s.jwt_secret = g("JWT_SECRET") or None
         s.remote_dir = g("REMOTE_DIR", s.remote_dir)
         s.ftps_host = g("FTPS_HOST", s.ftps_host)
         s.ftps_port = int(g("FTPS_PORT", s.ftps_port))

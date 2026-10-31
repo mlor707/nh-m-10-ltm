@@ -3,7 +3,6 @@
 Chạy:  uvicorn securetransfer.api:app --reload
 Mở:    http://127.0.0.1:8000        (giao diện)   |   http://127.0.0.1:8000/docs  (Swagger)
 
-CẢNH BÁO: header X-Username chỉ để DEMO. Bản thật phải dùng đăng nhập (JWT / LDAP / Kerberos).
 """
 from __future__ import annotations
 import os
@@ -11,11 +10,12 @@ import shutil
 import tempfile
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
 from .audit import AuditLog
-from .auth import PERMISSIONS, AuthError, Level, User, UserStore, authorize
+from .auth import PERMISSIONS, AuthError, Level, TokenManager, User, UserStore, authorize
 from .config import Settings
 from .crypto import CryptoError
 from .gateway import SCENARIO_PROTOCOL, Gateway
@@ -26,10 +26,16 @@ MAX_UPLOAD_MB = 50  # TODO: chỉnh theo nhu cầu / cấu hình
 PROTOCOL_TO_SCENARIO = {v: k for k, v in SCENARIO_PROTOCOL.items()}
 
 
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=1024)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     app = FastAPI(title="Secure Internal Document Transfer", version="0.2.0")
     users = UserStore(settings.users_path)
+    tokens = TokenManager(settings.jwt_secret) if settings.jwt_secret else None
     holder: dict[str, Gateway] = {}
 
     def gateway() -> Gateway:
@@ -40,11 +46,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def audit() -> AuditLog:
         return AuditLog(settings.audit_path)
 
-    def current_user(x_username: str | None = Header(default=None)) -> User:
-        if not x_username:
-            raise HTTPException(401, "Thiếu thông tin đăng nhập")
+    def current_user(authorization: str | None = Header(default=None)) -> User:
+        if not authorization:
+            raise HTTPException(401, "Thiếu access token")
+        scheme, separator, token = authorization.partition(" ")
+        if not separator or scheme.lower() != "bearer" or not token.strip():
+            raise HTTPException(401, "Authorization phải dùng Bearer token")
         try:
-            return users.get(x_username)
+            if tokens is None:
+                raise HTTPException(503, "Chưa cấu hình ST_JWT_SECRET")
+            return users.get(tokens.verify(token.strip()))
         except AuthError as e:
             raise HTTPException(401, str(e))
 
@@ -78,15 +89,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def health():
         return {"status": "ok"}
 
+    @app.post("/login")
+    def login(credentials: LoginRequest):
+        if tokens is None:
+            raise HTTPException(503, "Chưa cấu hình ST_JWT_SECRET")
+        try:
+            user = users.authenticate(credentials.username, credentials.password)
+        except AuthError as e:
+            audit().record(credentials.username, "login", "-", "denied", {"error": str(e)})
+            raise HTTPException(401, "Tên đăng nhập hoặc mật khẩu không đúng") from e
+        audit().record(user.username, "login", "-", "ok")
+        return {
+            "access_token": tokens.issue(user.username),
+            "token_type": "bearer",
+            "expires_in": tokens.ttl_seconds,
+        }
+
     @app.get("/protocols")
     def protocols():
         return SCENARIO_PROTOCOL
-
-    @app.get("/users")
-    def list_users():
-        # DEMO: để giao diện cho chọn người dùng. Bản thật bỏ endpoint này và dùng đăng nhập.
-        return [{"username": u.username, "role": u.role.value, "clearance": u.clearance.name}
-                for u in users._users.values()]
 
     @app.get("/me")
     def me(user: User = Depends(current_user)):

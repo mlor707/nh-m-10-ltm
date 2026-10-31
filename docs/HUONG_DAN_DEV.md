@@ -6,10 +6,19 @@ python -m venv .venv
 .venv\Scripts\activate          # Windows;  macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 copy .env.example .env          # macOS/Linux: cp .env.example .env
-python -m pytest -q             # phải xanh toàn bộ (56 test; test SSH tự bỏ qua nếu máy không có sshd)
+python -m pytest -q             # test SSH tự bỏ qua nếu máy không có sshd
 ```
 
 ## 2. Chạy thử nhanh (FTPS local)
+Trước khi khởi chạy ứng dụng, điền `ST_JWT_SECRET` trong `.env` bằng một chuỗi ngẫu nhiên dài ít nhất 32 byte
+(có thể tạo bằng `python -c "import secrets; print(secrets.token_urlsafe(48))"`), sau đó đặt mật khẩu cho tài khoản demo:
+```bash
+python -m securetransfer.auth set-password alice
+python -m securetransfer.auth set-password bob
+python -m securetransfer.auth set-password carol
+```
+Mật khẩu phải có ít nhất 12 ký tự. Hash scrypt được ghi vào `config/users.json`; không commit secret hoặc mật khẩu dạng rõ.
+
 ```bash
 # Terminal 1 – server FTPS giả lập
 python -m securetransfer.devserver
@@ -20,7 +29,7 @@ python -m securetransfer.cli receive --user alice --level SECRET hopdong.pdf ra.
 python -m securetransfer.cli audit-verify
 
 # Giao diện web:  uvicorn securetransfer.api:app --reload   rồi mở http://127.0.0.1:8000
-#   (chọn alice / bob / carol ở góc trái để thử các vai trò; Swagger UI tại /docs)
+#   (đăng nhập bằng tài khoản đã đặt mật khẩu; Swagger UI tại /docs)
 ```
 SCP / SFTP / rsync cần một máy chủ SSH. Làm theo `docs/DUNG_SSH_DEV.md` (Docker hoặc máy ảo); mất khoảng 5 phút.
 
@@ -29,7 +38,7 @@ SCP / SFTP / rsync cần một máy chủ SSH. Làm theo `docs/DUNG_SSH_DEV.md` 
 |------|-----------|-----------|
 | `crypto.py` | Mã hóa AES-256-GCM theo khối, chống sửa/cắt cụt | ✅ xong + test |
 | `audit.py` | Audit log hash-chain + gửi Syslog | ✅ xong + test |
-| `auth.py` | RBAC + mức mật | ✅ cơ bản (users.json) |
+| `auth.py` | Scrypt password hash, JWT bearer, RBAC + mức mật | ✅ |
 | `transfer/ftps.py` | FTPS | ✅ test end-to-end |
 | `transfer/scp.py`, `sftp.py`, `rsync.py` | SCP / SFTP / rsync | ✅ test với sshd thật (`tests/test_ssh_backends.py`) |
 | `transfer/_ssh.py` | Kết nối SSH: strict host key, timeout, báo lỗi dễ hiểu | ✅ test (`tests/test_ssh_strict.py`) |
@@ -37,7 +46,7 @@ SCP / SFTP / rsync cần một máy chủ SSH. Làm theo `docs/DUNG_SSH_DEV.md` 
 | `gateway.py` | Kiểm quyền → mã hóa → chọn giao thức → truyền → audit | ✅ |
 | `benchmark.py` | So sánh giao thức | ⚠️ đo được 1 file/1 lần, chưa có nhiều cỡ file, lặp lại, CPU/RAM |
 | `devssh.py`, `docker/` | Tạo khóa, tin cậy máy chủ (`trust-host`), máy chủ SSH dev | ✅ đã chạy với sshd thật; ⚠️ `docker compose up` chưa chạy thử |
-| `api.py` | REST API + phục vụ giao diện | ✅ test end-to-end; ⚠️ đăng nhập demo bằng header |
+| `api.py` | REST API + phục vụ giao diện | ✅ đăng nhập JWT bearer, audit login thất bại |
 | `web/index.html` | Giao diện: gửi, tải về, audit, so sánh giao thức | ✅ 1 file HTML/JS thuần, dễ sửa |
 | `devserver.py` | FTPS server giả lập | ✅ |
 
@@ -49,7 +58,7 @@ Dựng máy chủ SSH theo `docs/DUNG_SSH_DEV.md`.
 |-------|-----------|-------------|
 | A – Giao thức | `transfer/*`, `benchmark.py` | Test SCP/rsync/SFTP với VM; hoàn thiện benchmark (nhiều cỡ file, xuất CSV, biểu đồ); FTPS chạy cert thật |
 | B – Bảo mật | `crypto.py`, `auth.py`, `audit.py` | Khóa theo người nhận; LDAP/Kerberos; phê duyệt tài liệu SECRET; link chia sẻ có thời hạn; Syslog server (rsyslog) |
-| C – Ứng dụng | `api.py`, `web/index.html` | Đăng nhập thật (JWT/LDAP) thay cho chọn user demo; thanh tiến trình upload; biểu đồ benchmark; Docker Compose |
+| C – Ứng dụng | `api.py`, `web/index.html` | Thanh tiến trình upload; biểu đồ benchmark; Docker Compose |
 
 **Quy tắc Git:** mỗi người commit thường xuyên vào branch riêng, mở Pull Request vào `main` (thầy chấm theo commit từng thành viên).
 
