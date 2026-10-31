@@ -59,8 +59,9 @@ Xây dựng ứng dụng **truyền tải tài liệu nội bộ an toàn**, tro
 
 ```
                          ┌─ FTPS  (đối tác / hệ thống cũ)
-[Client App] ─ mã hóa ─> [Gateway chọn giao thức] ─ SCP   (quản trị, chuyển nhanh)
-  AES-256 phía client             │                └─ rsync (đồng bộ chi nhánh)
+[Client App] ─ đăng nhập JWT ─> [Gateway chọn giao thức] ─ SCP   (quản trị, chuyển nhanh)
+                                  │ mã hóa AES-256-GCM
+                                  │                └─ rsync (đồng bộ chi nhánh)
                                   │
         Xác thực (LDAP / Kerberos) ┤
         Nhật ký kiểm toán (Syslog) ┘──> [Kho lưu trữ mã hóa]
