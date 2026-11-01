@@ -7,9 +7,9 @@
 
 | STT | Họ và tên | MSSV | Vai trò |
 |-----|-----------|------|---------|
-| 1 | Ngô Tùng Anh Tú | _..._ | Nhóm trưởng | 
-| 2 | Dương Trần Bảo Linh | _..._ | Thành viên |
-| 3 | Nguyễn Huỳnh Bảo Hoàng | _..._ | Thành viên | 
+| 1 | Ngô Tùng Anh Tú | 2431540112 | Nhóm Trưởng |
+| 2 | Dương Trần Bảo Linh | 2431540211 | Thành Viên |
+| 3 | Nguyễn Huỳnh Bảo Hoàng | 2331540326 | Thành Viên |
 
 ## Tình trạng hiện tại
 
@@ -128,7 +128,21 @@ Các project trên mỗi cái chỉ giải quyết **một giao thức hoặc m�
 
 ---
 
-## 4. Giao diện
+## 4. Kết quả đã đạt được
+
+| Nhóm | Đã làm được | Nơi xem |
+|------|-------------|---------|
+| Truyền tệp | Gateway FTPS, SCP, rsync, SFTP (mốc so sánh); tự chọn giao thức theo tình huống | `securetransfer/gateway.py`, `transfer/` |
+| Mã hóa | AES-256-GCM chia khối 1 MiB, mỗi khối có nonce riêng và AAD (số thứ tự, cờ khối cuối) nên phát hiện đảo khối và cắt cụt file | `securetransfer/crypto.py` |
+| Xác thực, phân quyền | Mật khẩu băm scrypt, JWT hết hạn sau 60 phút, 3 vai trò (admin, staff, auditor), 4 mức mật | `auth.py`, `api.py` |
+| Nhật ký kiểm toán | Hash-chain; bật `ST_AUDIT_KEY` để dùng HMAC và file `.head` chống xóa dòng cuối; ghi cả lần bị từ chối; gửi Syslog tùy chọn | `audit.py` |
+| Chống ghi đè | Gửi trùng tên chỉ cho chủ tài liệu hoặc admin ghi đè, không được hạ mức mật (API trả 409) | `gateway.py` |
+| Chia sẻ có kiểm soát | Link có hạn dùng, giới hạn số lần tải, thu hồi, chặn tài liệu Tuyệt mật, gắn với một phiên bản tài liệu | `shares.py` |
+| So sánh giao thức | Đo thời gian gửi và nhận, tốc độ, kiểm tra toàn vẹn SHA-256, xuất CSV | `benchmark.py` |
+| Giao diện web | Đăng nhập, gửi tài liệu, danh sách tài liệu kèm nút Chia sẻ, nhật ký kiểm toán, so sánh giao thức | `securetransfer/web/index.html` |
+| Kiểm thử | Hàng trăm ca kiểm thử tự động: mã hóa, audit, phân quyền, API, SSH, chống ghi đè, link chia sẻ | `tests/` |
+
+###Giao diện
 
 | Gửi tài liệu | Tài liệu đã gửi | Nhật ký kiểm toán |
 |:---:|:---:|:---:|
@@ -137,58 +151,76 @@ Các project trên mỗi cái chỉ giải quyết **một giao thức hoặc m�
 
 ## 5. Cài đặt & chạy thử
 
-**Yêu cầu:** Python 3.12 (đã kiểm thử) và Git. Tùy chọn: Docker Desktop để chạy máy chủ SSH; trên Windows cần WSL2 nếu muốn thử rsync.
+**Yêu cầu:** Python 3.10 trở lên (đã chạy với 3.11), Git. Tùy chọn: Docker Desktop để dựng máy chủ SSH thử SCP, SFTP, rsync; WSL2 trên Windows nếu muốn thử rsync.
 
-```bash
+**Bước 1: Lấy code và cài thư viện** (Windows PowerShell; macOS/Linux dùng `source .venv/bin/activate` và `cp`):
+```
 git clone https://github.com/mlor707/nh-m-10-ltm.git
 cd nh-m-10-ltm
 python -m venv .venv
-.venv\Scripts\activate          # macOS/Linux: source .venv/bin/activate
+.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-copy .env.example .env          # macOS/Linux: cp .env.example .env
-python -m pytest -q             # test SSH tự bỏ qua nếu máy không có sshd
+copy .env.example .env
 ```
 
-**Chạy giao diện web** (dùng máy chủ FTPS giả lập, không cần Docker):
-
-1. Mở `.env`, đặt `ST_JWT_SECRET` là một chuỗi ngẫu nhiên dài ít nhất 32 byte. Tạo bằng:
-   `python -c "import secrets; print(secrets.token_urlsafe(48))"`
-   Nên đặt thêm `ST_AUDIT_KEY` (cùng cách tạo) để nhật ký kiểm toán được ký HMAC.
-2. Đặt mật khẩu cho tài khoản demo (mỗi lệnh hỏi mật khẩu hai lần, tối thiểu 12 ký tự):
-   ```bash
-   python -m securetransfer.auth set-password alice
-   python -m securetransfer.auth set-password bob
-   python -m securetransfer.auth set-password carol
-   ```
-3. Mở hai cửa sổ terminal:
-   ```bash
-   # Cửa sổ 1: máy chủ FTPS giả lập
-   python -m securetransfer.devserver
-
-   # Cửa sổ 2: ứng dụng
-   uvicorn securetransfer.api:app --reload
-   ```
-4. Mở http://127.0.0.1:8000 và đăng nhập. `alice` là admin, `bob` là nhân viên (mức Nội bộ), `carol` là kiểm toán viên.
-
-**Thử SCP, SFTP, rsync** cần một máy chủ SSH:
-
-```bash
-python -m securetransfer.devssh keygen        # tạo khóa đăng nhập, in ra các dòng cần thêm vào .env
-docker compose up -d --build                  # bật máy chủ SSH (chỉ máy chủ SSH, chưa gồm ứng dụng)
-python -m securetransfer.cli ssh-check        # chẩn đoán từng bước, mỗi lỗi kèm gợi ý
-python -m securetransfer.cli benchmark --sizes 1 10 50 --repeat 3 --csv data/benchmark.csv
+**Bước 2: Điền khóa vào `.env`.** Tạo hai chuỗi ngẫu nhiên khác nhau bằng lệnh dưới (chạy hai lần) rồi dán vào `ST_JWT_SECRET` (bắt buộc) và `ST_AUDIT_KEY` (khuyên dùng):
 ```
-Chi tiết và cách xử lý lỗi: [docs/DUNG_SSH_DEV.md](docs/DUNG_SSH_DEV.md).
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+**Bước 3: Đặt mật khẩu cho ba tài khoản demo** (tối thiểu 12 ký tự, lệnh hỏi hai lần):
+```
+python -m securetransfer.auth set-password alice
+python -m securetransfer.auth set-password bob
+python -m securetransfer.auth set-password carol
+```
+Mật khẩu được lưu dưới dạng hash scrypt trong `config/users.json`. Không commit file này sau khi đặt mật khẩu; có thể tách ra file riêng bằng cách đặt `ST_USERS_PATH=data/users.local.json` trong `.env` (thư mục `data/` đã nằm trong `.gitignore`).
+
+**Bước 4: Chạy** (hai cửa sổ terminal, cả hai đã activate `.venv`):
+```
+python -m securetransfer.devserver          # cửa sổ 1: máy chủ FTPS giả lập
+uvicorn securetransfer.api:app --reload     # cửa sổ 2: ứng dụng
+```
+Mở http://127.0.0.1:8000 và đăng nhập. Trang tài liệu API (Swagger) ở http://127.0.0.1:8000/docs.
+
+**Tài khoản demo**
+
+| Tài khoản | Vai trò | Mức mật tối đa | Làm được gì |
+|-----------|---------|----------------|-------------|
+| alice | Quản trị | Tuyệt mật | Gửi, nhận, xem nhật ký, chạy so sánh giao thức |
+| bob | Nhân viên | Nội bộ | Gửi và nhận tài liệu, tối đa mức Nội bộ |
+| carol | Kiểm toán viên | Mật | Chỉ xem nhật ký kiểm toán |
+
+**Kịch bản thử nhanh**
+1. Đăng nhập `bob`, gửi một file mức Nội bộ.
+2. `bob` thử gửi mức Tuyệt mật: bị từ chối. `alice` gửi được.
+3. Đăng nhập `carol`, mở Nhật ký kiểm toán: thấy cả lần thành công lẫn lần bị từ chối.
+4. `bob` mở Tài liệu đã gửi, bấm **Chia sẻ**, chọn hạn dùng và số lần tải, sao chép link và mở ở cửa sổ ẩn danh: tải được mà không cần đăng nhập. Mở quá số lần hoặc sau khi thu hồi thì báo lỗi 410.
+5. Kiểm tra nhật ký: `python -m securetransfer.cli audit-verify`. Sửa tay một dòng trong `data/audit.log` rồi chạy lại: hệ thống báo lỗi đúng dòng bị sửa.
+
+**Dòng lệnh**
+```
+python -m securetransfer.cli send --user alice --level SECRET hopdong.pdf
+python -m securetransfer.cli receive --user alice --level SECRET hopdong.pdf ra.pdf
+python -m securetransfer.cli audit-verify
+python -m securetransfer.cli ssh-check
+python -m securetransfer.cli benchmark --sizes 1 10 50 --repeat 3 --protocols scp sftp rsync ftps --csv data/benchmark.csv
+```
+
+**SCP, SFTP, rsync** cần một máy chủ SSH: làm theo [docs/DUNG_SSH_DEV.md](docs/DUNG_SSH_DEV.md) (dựng bằng Docker, khoảng 5 phút). rsync không chạy trên Windows thuần, cần WSL2.
+
+**Chạy kiểm thử:** `python -m pytest -q`. Các test SSH tự bỏ qua nếu máy không có `sshd` hoặc `rsync` (trên Windows hãy chạy trong WSL để chạy đủ).
 
 ## 6. Giới hạn đã biết
 
-- **Không phải mã hóa đầu-cuối từ trình duyệt.** Trình duyệt gửi tài liệu tới API, và gateway mã hóa rồi mới gửi tới máy chủ lưu trữ. Máy chủ lưu trữ (FTPS, SSH) chỉ thấy bản mã hóa, nhưng máy chạy gateway giữ khóa `data/master.key` và thấy nội dung gốc.
-- **API chạy HTTP thường.** Khi triển khai thật phải đặt sau một proxy HTTPS (ví dụ nginx), nếu không mật khẩu và token đi qua mạng ở dạng rõ.
-- **Cấu hình mặc định chỉ để phát triển:** tài khoản FTPS `test/test123`, chứng chỉ tự ký với `ST_FTPS_VERIFY=false`, và kết nối SSH tự tin cậy máy chủ lạ ở lần đầu (bật `ST_SSH_STRICT_HOST_KEY=true` khi demo hoặc chạy thật). Không dùng nguyên cấu hình này để chạy thật.
-- **Khóa mã hóa và nhật ký lưu trên cùng máy chạy ứng dụng.** Nhật ký chống sửa tốt hơn khi đặt `ST_AUDIT_KEY`, nhưng người có cả khóa lẫn quyền ghi file vẫn có thể làm giả.
-- **Số đo tốc độ chỉ có ý nghĩa tương đối.** Máy chủ FTPS thử nghiệm viết bằng Python, còn SSH dùng OpenSSH; xem phần "Giới hạn của phép đo" trong [docs/SO_SANH_GIAO_THUC.md](docs/SO_SANH_GIAO_THUC.md).
-- Trên Windows, rsync chỉ chạy được trong WSL2.
-
+- **Mã hóa thực hiện tại gateway, không phải mã hóa đầu-cuối phía client.** File đi tới gateway ở dạng rõ rồi được mã hóa bằng một khóa duy nhất `data/master.key`; quản trị viên gateway vẫn đọc được. Mã hóa đầu-cuối thật (trong trình duyệt, khóa theo từng người nhận) là hướng phát triển.
+- **Giao diện web chạy HTTP.** Khi triển khai ngoài máy cá nhân phải đặt sau TLS.
+- **Cấu hình mặc định là chế độ phát triển:** `ST_FTPS_VERIFY=false`, `ST_SSH_STRICT_HOST_KEY` chưa bật. Khi chạy thật phải bật xác minh chứng chỉ và strict host key (xem `docs/DUNG_SSH_DEV.md`).
+- Audit log cục bộ không phát hiện được việc khôi phục cả log lẫn file `.head` từ bản sao cũ; nên gửi Syslog sang máy chủ riêng để đối chiếu.
+- Danh sách tài liệu hiện được suy ra từ nhật ký kiểm toán.
+- Chưa có giới hạn số lần đăng nhập sai.
+- **Chưa làm:** đồng bộ LDAP, SSO Kerberos, quy trình phê duyệt 2 người, xuất báo cáo tuân thủ.
+- Số đo so sánh giao thức đang được cập nhật trong [docs/SO_SANH_GIAO_THUC.md](docs/SO_SANH_GIAO_THUC.md) (mục 5).
 
 ## 7. Tài liệu trong repo
 
@@ -198,6 +230,29 @@ Chi tiết và cách xử lý lỗi: [docs/DUNG_SSH_DEV.md](docs/DUNG_SSH_DEV.md
 | [docs/DUNG_SSH_DEV.md](docs/DUNG_SSH_DEV.md) | Dựng máy chủ SSH, chế độ strict host key, xử lý lỗi |
 | [docs/SO_SANH_GIAO_THUC.md](docs/SO_SANH_GIAO_THUC.md) | So sánh FTPS, SCP, rsync, SFTP và cách đo |
 
-## 8. Giấy phép
+## 8. Hướng phát triển tiếp
+Mã hóa trong trình duyệt với khóa theo người nhận hoặc KMS; LDAP và Kerberos; phê duyệt 2 người cho tài liệu Tuyệt mật; báo cáo tuân thủ xuất CSV hoặc PDF; HTTPS bắt buộc; GitHub Actions chạy test; cơ sở dữ liệu cho thông tin tài liệu.
+
+## 9. Cấu trúc thư mục và làm việc nhóm 
+
+```
+securetransfer/
+  api.py          REST API và phục vụ giao diện
+  auth.py         scrypt, JWT, phân quyền theo vai trò và mức mật
+  gateway.py      kiểm quyền, chống ghi đè, mã hóa, chọn giao thức, ghi nhật ký
+  crypto.py       AES-256-GCM theo khối
+  audit.py        nhật ký hash-chain / HMAC, Syslog
+  shares.py       link chia sẻ có thời hạn
+  benchmark.py    so sánh giao thức
+  transfer/       FTPS, SCP, rsync, SFTP (chung giao diện TransferBackend)
+  web/index.html  giao diện
+tests/            kiểm thử tự động
+docs/             hướng dẫn dựng SSH, hướng dẫn phát triển, so sánh giao thức
+docker/, docker-compose.yml   máy chủ SSH để thử
+```
+
+**Quy ước làm việc:** mỗi người làm trên nhánh riêng, mở Pull Request vào `main`, người khác xem rồi mới merge; commit mang đúng tên người làm. Tài liệu chi tiết: [docs/HUONG_DAN_DEV.md](docs/HUONG_DAN_DEV.md).
+
+## Giấy phép
 
 MIT, xem file [LICENSE](LICENSE).
