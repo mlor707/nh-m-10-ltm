@@ -91,6 +91,13 @@ table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 th { font-weight: 600; color: var(--muted); font-size: 13.5px; white-space: nowrap; }
 td.mono { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+td .btn + .btn { margin-left: 6px; }
+.sharebox { margin-top: 18px; }
+.sharebox h2 { font-size: 18px; margin: 0 0 4px; }
+.sharebox .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: end; margin: 14px 0 4px; }
+.sharebox .row .field { min-width: 170px; }
+.linkrow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.linkrow input { flex: 1; min-width: 260px; font: inherit; font-family: ui-monospace, Consolas, monospace; font-size: 13px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
 .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
 .empty { color: var(--muted); padding: 28px 8px; }
 .bar { height: 8px; background: color-mix(in srgb, var(--accent) 80%, transparent); border-radius: 4px; min-width: 2px; }
@@ -167,11 +174,12 @@ td.mono { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
 
     <section id="view-docs" hidden>
       <h1>Tài liệu đã gửi</h1>
-      <p class="sub">Chỉ hiện những tài liệu có mức mật không vượt quá cấp độ của bạn. Khi tải về, hệ thống tự giải mã.</p>
+      <p class="sub">Chỉ hiện những tài liệu có mức mật không vượt quá cấp độ của bạn. Khi tải về, hệ thống tự giải mã. Bấm <strong>Chia sẻ</strong> để tạo link có thời hạn và giới hạn số lần tải (không áp dụng cho tài liệu Tuyệt mật).</p>
       <div class="panel">
         <div class="tablewrap" id="docsBox"></div>
         <div id="docsMsg" role="status"></div>
       </div>
+      <div id="shareBox"></div>
     </section>
 
     <section id="view-audit" hidden>
@@ -379,7 +387,7 @@ $("sendForm").addEventListener("submit", async (e) => {
 
 /* ---------- Danh sách tài liệu ---------- */
 async function loadDocs() {
-  const box = $("docsBox"); say($("docsMsg"));
+  const box = $("docsBox"); say($("docsMsg")); $("shareBox").replaceChildren();
   try {
     const docs = await (await api("/documents")).json();
     if (!docs.length) return box.replaceChildren(h("div", { class: "empty" }, "Chưa có tài liệu nào. Gửi tài liệu đầu tiên ở mục Gửi tài liệu."));
@@ -388,7 +396,7 @@ async function loadDocs() {
       h("tbody", {}, ...docs.map((d) => h("tr", {},
         h("td", {}, d.name), h("td", {}, levelChip(d.level)), h("td", {}, d.protocol.toUpperCase()),
         h("td", {}, d.sender), h("td", {}, fmtTime(d.ts)),
-        h("td", {}, h("button", { class: "btn ghost", type: "button", onclick: () => download(d) }, "Tải về và giải mã")))))));
+        h("td", {}, h("button", { class: "btn ghost", type: "button", onclick: () => download(d) }, "Tải về và giải mã"), shareButton(d)))))));
   } catch (err) { box.replaceChildren(); say($("docsMsg"), err.message, "err"); }
 }
 async function download(d) {
@@ -399,6 +407,68 @@ async function download(d) {
     document.body.append(a); a.click(); a.remove();
     say($("docsMsg"), `Đã giải mã và tải "${d.name}".`, "ok");
   } catch (err) { say($("docsMsg"), "Không tải được: " + err.message, "err"); }
+}
+
+/* ---------- Link chia sẻ có thời hạn ---------- */
+const SHARE_EXPIRES = [[5, "5 phút"], [30, "30 phút"], [60, "1 giờ"], [1440, "1 ngày"], [10080, "7 ngày"]];
+const SHARE_LIMITS = [1, 3, 5, 10];
+
+function shareButton(d) {
+  const mine = d.sender === state.me.username || state.me.role === "admin";
+  const attrs = { class: "btn ghost", type: "button", onclick: () => openShare(d) };
+  if (d.level === "SECRET") { attrs.disabled = "disabled"; attrs.title = "Tài liệu Tuyệt mật không được chia sẻ"; }
+  else if (!mine) { attrs.disabled = "disabled"; attrs.title = "Chỉ người gửi hoặc quản trị viên mới được chia sẻ"; }
+  return h("button", attrs, "Chia sẻ");
+}
+
+function openShare(d) {
+  const exp = h("select", { class: "full", id: "shareExp" }, ...SHARE_EXPIRES.map(([v, t]) => h("option", { value: String(v) }, t)));
+  const lim = h("select", { class: "full", id: "shareLim" }, ...SHARE_LIMITS.map((n) => h("option", { value: String(n) }, n + " lần")));
+  exp.value = "30"; lim.value = "3";
+  const make = h("button", { class: "btn", type: "button", id: "shareMake" }, "Tạo link");
+  make.addEventListener("click", () => createShare(d, exp.value, lim.value, make));
+  $("shareBox").replaceChildren(h("div", { class: "panel sharebox" },
+    h("h2", {}, "Chia sẻ \"" + d.name + "\""),
+    h("p", { class: "hint" }, "Người có link tải được mà không cần đăng nhập. Link tự hết hạn, và bạn có thể thu hồi bất cứ lúc nào."),
+    h("div", { class: "row" },
+      h("div", { class: "field" }, h("label", { for: "shareExp" }, "Hết hạn sau"), exp),
+      h("div", { class: "field" }, h("label", { for: "shareLim" }, "Tải tối đa"), lim),
+      make,
+      h("button", { class: "btn ghost", type: "button", onclick: () => $("shareBox").replaceChildren() }, "Đóng")),
+    h("div", { id: "shareResult" }),
+    h("div", { id: "shareStatus", role: "status" })));
+}
+
+async function createShare(d, minutes, limit, btn) {
+  btn.disabled = true; say($("shareStatus"));
+  try {
+    const r = await (await api("/documents/" + encodeURIComponent(d.name) + "/share", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expires_minutes: Number(minutes), max_downloads: Number(limit) }) })).json();
+    const link = location.origin + r.url;
+    const input = h("input", { type: "text", readonly: "readonly", id: "shareLink", value: link, "aria-label": "Link chia sẻ" });
+    input.addEventListener("focus", () => input.select());
+    $("shareResult").replaceChildren(
+      h("div", { class: "msg ok" }, "Đã tạo link. Hết hạn lúc " + fmtTime(r.expires_at * 1000) + ", tải tối đa " + r.max_downloads + " lần."),
+      h("div", { class: "linkrow" }, input,
+        h("button", { class: "btn ghost", type: "button", onclick: () => copyShare(input) }, "Sao chép"),
+        h("button", { class: "btn ghost", type: "button", onclick: () => window.open(link, "_blank", "noopener") }, "Mở thử (tính 1 lượt tải)"),
+        h("button", { class: "btn ghost", type: "button", onclick: () => revokeShare(r.token) }, "Thu hồi")));
+  } catch (err) { $("shareResult").replaceChildren(); say($("shareStatus"), "Không tạo được link: " + err.message, "err"); }
+  finally { btn.disabled = false; }
+}
+
+async function copyShare(input) {
+  try { await navigator.clipboard.writeText(input.value); }
+  catch (_) { input.select(); document.execCommand("copy"); }
+  say($("shareStatus"), "Đã sao chép link.", "ok");
+}
+
+async function revokeShare(token) {
+  try {
+    await api("/share/" + encodeURIComponent(token), { method: "DELETE" });
+    say($("shareStatus"), "Đã thu hồi link. Từ giờ mở link sẽ báo lỗi 410.", "ok");
+  } catch (err) { say($("shareStatus"), "Không thu hồi được: " + err.message, "err"); }
 }
 
 /* ---------- Audit ---------- */
