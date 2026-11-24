@@ -74,6 +74,24 @@ def test_gateway_end_to_end(cfg, tmp_path, monkeypatch, scenario, proto):
     assert gw.audit.verify() == (True, None)
 
 
+def test_rsync_special_characters_in_document_name(cfg, tmp_path):
+    """Tên có khoảng trắng và `$(...)` phải thành đúng MỘT file trên máy chủ, không bị shell từ xa thông dịch."""
+    import shutil
+    if shutil.which("rsync") is None:
+        pytest.skip("không có lệnh rsync")
+    s, remote = cfg
+    gw = Gateway(s, backends=_backends(s))
+    alice = User("alice", Role.ADMIN, Level.SECRET)
+    name = "bao cao $(echo X) `echo Y`; z.txt"
+    src = tmp_path / "src.txt"
+    src.write_text("noi dung", encoding="utf-8")
+    gw.send(alice, str(src), remote_name=name, level=Level.INTERNAL, scenario="sync")
+    assert (remote / (name + ".enc")).exists()         # đúng tên nguyên văn, không bị mở rộng thành tên khác
+    out = tmp_path / "out.txt"
+    gw.receive(alice, name, str(out), scenario="sync")
+    assert out.read_text(encoding="utf-8") == "noi dung"
+
+
 def test_benchmark_all_ssh_protocols(cfg):
     from securetransfer import benchmark
     s, remote = cfg

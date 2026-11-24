@@ -7,6 +7,13 @@ Hai chế độ:
     và file `<log>.head` (có chữ ký HMAC) ghi số dòng + hash dòng cuối để phát hiện việc xóa dòng cuối.
     Giới hạn còn lại: kẻ có cả khóa, hoặc khôi phục lại cả log lẫn .head từ bản sao cũ, thì local không phát hiện được.
     Vì vậy mỗi dòng gửi Syslog kèm hash, để máy chủ log từ xa giữ bản đối chiếu.
+
+Hiệu năng: record() KHÔNG đọc lại cả file. Số dòng và hash dòng cuối được giữ trong bộ nhớ; chỉ khi kích thước
+file khác với lần ghi/quét trước (tiến trình khác ghi vào, file bị thay) mới quét lại một lần. Người đọc dùng
+read_from(offset) để chỉ lấy các dòng mới kể từ lần đọc trước (xem docindex.py). Mỗi lần ghi vẫn là một lần
+append + một lần ghi file .head (chế độ có khóa), tức chi phí không tăng theo độ dài log.
+Giới hạn: chưa có khóa file giữa nhiều TIẾN TRÌNH; chạy nhiều worker cùng ghi vào một log vẫn có thể làm lệch
+chuỗi hash (verify() sẽ phát hiện). Hiện chỉ hỗ trợ một tiến trình ghi.
 """
 from __future__ import annotations
 import hashlib
@@ -24,6 +31,10 @@ ALG_HMAC = "hmac-sha256"
 MIN_KEY_BYTES = 32
 
 
+class AuditResetError(Exception):
+    """Offset người đọc giữ đã quá kích thước file: log bị cắt ngắn/thay mới, phải đọc lại từ đầu."""
+
+
 class AuditLog:
     def __init__(self, path: str, syslog_address: tuple[str, int] | None = None,
                  key: bytes | str | None = None):
@@ -36,6 +47,10 @@ class AuditLog:
         if key is not None and len(key) < MIN_KEY_BYTES:
             raise ValueError(f"ST_AUDIT_KEY phải có ít nhất {MIN_KEY_BYTES} byte")
         self._key = key or None
+        # Trạng thái đuôi log trong bộ nhớ (xem docstring đầu file)
+        self._synced = False
+        self._n, self._last, self._size, self._needs_newline = 0, GENESIS, 0, False
+        self.scan_count = 0            # số lần phải quét cả file; dùng cho test và theo dõi
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         self._logger = None
         if syslog_address:  # Giao thức Syslog
@@ -85,6 +100,27 @@ class AuditLog:
             if os.path.exists(tmp):
                 os.unlink(tmp)
 
+    def _tail(self) -> tuple[str, int]:
+        """(hash dòng cuối, số dòng). O(1) khi file không đổi kể từ lần ghi/quét trước; nếu khác thì quét lại."""
+        try:
+            size = os.path.getsize(self.path)
+        except FileNotFoundError:
+            size = 0
+        if self._synced and size == self._size:
+            return self._last, self._n
+        self.scan_count += 1
+        n, last_raw, ends_nl = 0, None, True
+        if size:
+            with open(self.path, "rb") as f:
+                for raw in f:                       # duyệt từng dòng, không nạp cả file vào bộ nhớ
+                    ends_nl = raw.endswith(b"\n")
+                    if raw.strip():
+                        n, last_raw = n + 1, raw
+        last = json.loads(last_raw)["hash"] if last_raw else GENESIS
+        self._n, self._last, self._size = n, last, size
+        self._needs_newline, self._synced = not ends_nl, True
+        return last, n
+
     def record(self, user: str, action: str, target: str, status: str = "ok",
                details: dict | None = None) -> dict:
         # TODO: dùng thời gian đồng bộ NTP của hệ điều hành (chrony / w32time)
@@ -96,26 +132,56 @@ class AuditLog:
             }
             if self._key:
                 entry["alg"] = ALG_HMAC
-            existing = self.read_all()
-            prev = existing[-1]["hash"] if existing else GENESIS
+            prev, n = self._tail()
             entry["prev"] = prev
             body = {k: v for k, v in entry.items() if k not in ("prev", "hash")}
             entry["hash"] = self._mac(prev, body) if self._key else self._hash(prev, body)
-            with open(self.path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            # Ghi nhị phân: kích thước tính được chính xác, không bị Windows đổi \n thành \r\n
+            data = (b"\n" if self._needs_newline else b"") + \
+                   (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
+            with open(self.path, "ab") as f:
+                f.write(data)
+            expected = self._size + len(data)
+            actual = os.path.getsize(self.path)
+            self._n, self._last, self._size, self._needs_newline = n + 1, entry["hash"], actual, False
+            if actual != expected:                  # có tiến trình khác chen vào giữa: lần sau quét lại cho chắc
+                self._synced = False
             if self._key:
-                self._write_head(len(existing) + 1, entry["hash"])
+                self._write_head(n + 1, entry["hash"])
         if self._logger:
             self._logger.info("securetransfer user=%s action=%s target=%s status=%s hash=%s",
                               user, action, target, status, entry["hash"])
         return entry
 
-    def read_all(self) -> list[dict]:
+    def read_from(self, offset: int = 0) -> tuple[list[dict], int]:
+        """Đọc các dòng từ byte `offset` đến hết file. Trả (các bản ghi, offset mới) để lần sau đọc tiếp, nhờ đó
+        người đọc chỉ trả giá cho phần log MỚI. Dòng cuối đang ghi dở (chưa trọn JSON) thì để lại cho lần sau.
+        Raise AuditResetError nếu offset vượt quá kích thước file (log đã bị cắt/thay)."""
         with self._lock:  # không đọc phải dòng đang được ghi dở bởi luồng khác
-            if not os.path.exists(self.path):
-                return []
-            with open(self.path, encoding="utf-8") as f:
-                return [json.loads(l) for l in f if l.strip()]
+            try:
+                size = os.path.getsize(self.path)
+            except FileNotFoundError:
+                size = 0
+            if offset > size:
+                raise AuditResetError(f"offset {offset} vượt quá kích thước log ({size})")
+            entries: list[dict] = []
+            if offset == size:
+                return entries, offset
+            with open(self.path, "rb") as f:
+                f.seek(offset)
+                for raw in f:
+                    if raw.strip():
+                        try:
+                            entries.append(json.loads(raw))
+                        except ValueError:
+                            if raw.endswith(b"\n"):
+                                raise                # dòng đầy đủ mà hỏng: báo lỗi như trước đây
+                            break                    # dòng cuối ghi dở: đọc lần sau
+                    offset += len(raw)
+            return entries, offset
+
+    def read_all(self) -> list[dict]:
+        return self.read_from(0)[0]
 
     # ---------- kiểm tra ----------
     def _read_head(self):

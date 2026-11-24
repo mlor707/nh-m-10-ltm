@@ -1,19 +1,37 @@
 """Cấu hình đọc từ biến môi trường (tiền tố ST_). Xem .env.example."""
 from __future__ import annotations
 import os
+import re
 from dataclasses import dataclass
+
+
+def _parse_dotenv_value(raw: str) -> str:
+    """Giá trị trong .env. Dấu # chỉ mở đầu chú thích khi đứng sau khoảng trắng và giá trị không đặt trong
+    ngoặc kép/đơn, nên mật khẩu như 'p#ss' hay 'abc#123' không bị cắt cụt."""
+    raw = raw.strip()
+    if raw[:1] in ("'", '"'):
+        end = raw.find(raw[0], 1)
+        if end != -1:                       # có ngoặc đóng: lấy nguyên nội dung bên trong, bỏ phần sau
+            return raw[1:end]
+    return re.split(r"\s+#", raw, maxsplit=1)[0].strip()
 
 
 def _load_dotenv(path: str = ".env") -> None:
     """Đọc file .env (KEY=VALUE) nếu có. Biến môi trường đã đặt sẵn sẽ được ưu tiên."""
     if not os.path.exists(path):
         return
-    with open(path, encoding="utf-8") as f:
+    with open(path, encoding="utf-8-sig") as f:   # utf-8-sig: bỏ BOM mà Notepad hay thêm vào
         for line in f:
-            line = line.split("#", 1)[0].strip()
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export "):].lstrip()
             if "=" in line:
                 k, v = line.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+                k = k.strip()
+                if k:
+                    os.environ.setdefault(k, _parse_dotenv_value(v))
 
 
 def _bool(v: str | None, default: bool) -> bool:
@@ -44,6 +62,13 @@ class Settings:
     ssh_timeout: int = 20
     # Nhật ký kiểm toán: đặt khóa (>= 32 byte) để dùng HMAC và chống sửa/xóa dòng cuối
     audit_key: str | None = None
+    # Cho phép giải mã file STF1 cũ (không gắn với tài liệu). Mặc định tắt; chỉ bật tạm khi di chuyển dữ liệu cũ.
+    allow_legacy_enc: bool = False
+    # Giới hạn đăng nhập sai: quá `login_max_failures` lần trong `login_window_seconds` giây thì khóa
+    # `login_lockout_seconds` giây. Đặt login_max_failures = 0 để tắt (chỉ nên dùng khi phát triển).
+    login_max_failures: int = 5
+    login_window_seconds: int = 300
+    login_lockout_seconds: int = 300
     # Syslog (tùy chọn)
     syslog_host: str | None = None
     syslog_port: int = 514
@@ -85,6 +110,10 @@ class Settings:
         s.ssh_known_hosts = g("SSH_KNOWN_HOSTS") or None
         s.ssh_timeout = int(g("SSH_TIMEOUT", s.ssh_timeout))
         s.audit_key = g("AUDIT_KEY") or None
+        s.allow_legacy_enc = _bool(g("ALLOW_LEGACY_ENC"), s.allow_legacy_enc)
+        s.login_max_failures = int(g("LOGIN_MAX_FAILURES", s.login_max_failures))
+        s.login_window_seconds = int(g("LOGIN_WINDOW_SECONDS", s.login_window_seconds))
+        s.login_lockout_seconds = int(g("LOGIN_LOCKOUT_SECONDS", s.login_lockout_seconds))
         s.syslog_host = g("SYSLOG_HOST")
         s.syslog_port = int(g("SYSLOG_PORT", s.syslog_port))
         return s
