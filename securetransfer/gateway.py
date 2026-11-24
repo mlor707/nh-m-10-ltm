@@ -10,6 +10,7 @@ from .audit import AuditLog
 from .auth import AuthError, Level, Role, User, authorize
 from .config import Settings
 from .crypto import decrypt_file, encrypt_file, load_or_create_key
+from .docindex import DocumentIndex
 from .transfer import TransferBackend, TransferError, build_backends
 
 # Chính sách chọn giao thức theo tình huống (sửa tại đây khi nhóm thống nhất)
@@ -25,6 +26,10 @@ class ConflictError(Exception):
     """Tên tài liệu đã được dùng, hoặc việc ghi đè không được phép (API trả HTTP 409)."""
 
 
+class DocumentNotFoundError(TransferError):
+    """Không có bản ghi gửi thành công cho tài liệu này, nên không biết mức mật thật của nó."""
+
+
 class Gateway:
     def __init__(self, settings: Settings, audit: AuditLog | None = None,
                  backends: dict[str, TransferBackend] | None = None):
@@ -34,6 +39,7 @@ class Gateway:
         self.key = load_or_create_key(settings.key_path)
         self._locks_guard = threading.Lock()
         self._name_locks: dict[str, threading.Lock] = {}
+        self._docs = DocumentIndex(self.audit, self.document_key)
 
     def _pick(self, scenario: str) -> TransferBackend:
         if scenario not in SCENARIO_PROTOCOL:
@@ -55,11 +61,10 @@ class Gateway:
             return self._name_locks.setdefault(key, threading.Lock())
 
     def _latest_send(self, key: str) -> dict | None:
-        last = None
-        for e in self.audit.read_all():
-            if e["action"] == "send" and e["status"] == "ok" and self.document_key(e["target"]) == key:
-                last = e
-        return last
+        """Lần gửi thành công mới nhất của tài liệu, lấy từ chỉ mục tăng dần (không quét lại cả audit log)."""
+        if self._docs.audit is not self.audit:      # ai đó thay self.audit sau khi tạo Gateway
+            self._docs = DocumentIndex(self.audit, self.document_key)
+        return self._docs.latest(key)
 
     def _check_overwrite(self, user: User, key: str, level: Level) -> None:
         """Gửi trùng tên = ghi đè file trên máy chủ. Chỉ cho phép khi không làm mất hay hạ cấp tài liệu của người khác."""
@@ -72,6 +77,19 @@ class Gateway:
             raise ConflictError("Tên tài liệu đã được dùng. Hãy đổi tên file rồi gửi lại.")
         if level < old:
             raise ConflictError(f"Không được hạ mức mật khi ghi đè tài liệu đã có ({old.name} xuống {level.name}).")
+
+    def _crypto_context(self, name: str, level: Level) -> bytes:
+        """Gắn bản mã với đúng tên tài liệu và mức mật (đưa vào AAD của AES-GCM). Khi ai đó tráo file .enc
+        sang tên khác, hoặc kỳ vọng một mức mật khác, giải mã sẽ thất bại thay vì trả nhầm nội dung."""
+        return f"securetransfer/v1|name={self._basename(name)}|level={level.name}".encode("utf-8")
+
+    def _recorded_level(self, name: str) -> Level:
+        """Mức mật THẬT của tài liệu, lấy từ lần gửi thành công mới nhất. Không tin mức do người gọi khai."""
+        last = self._latest_send(self.document_key(name))
+        if last is None:
+            raise DocumentNotFoundError("Không tìm thấy tài liệu")
+        # Thiếu hoặc sai trường level thì coi là SECRET (đóng mặc định), giống _check_overwrite
+        return Level.__members__.get(last.get("details", {}).get("level", "SECRET"), Level.SECRET)
 
     def _remote(self, name: str) -> str:
         safe = os.path.basename(name.replace("\\", "/"))  # chống path traversal (../)
@@ -91,7 +109,7 @@ class Gateway:
                 self._check_overwrite(user, key, level)
                 with tempfile.TemporaryDirectory() as tmp:
                     enc = os.path.join(tmp, "payload.enc")
-                    encrypt_file(local_path, enc, self.key)
+                    encrypt_file(local_path, enc, self.key, self._crypto_context(name, level))
                     backend.upload(enc, remote)
                 self.audit.record(user.username, "send", name, "ok",
                                   {"protocol": backend.name, "level": level.name})
@@ -103,15 +121,21 @@ class Gateway:
         return remote
 
     def receive(self, user: User, remote_name: str, dest_path: str,
-                level: Level = Level.INTERNAL, scenario: str = "partner") -> str:
+                level: Level | None = None, scenario: str = "partner") -> str:
+        """Tải và giải mã. Mức mật dùng để kiểm quyền là mức đã ghi lúc gửi; tham số `level` (nếu có) chỉ có thể
+        làm quy tắc chặt hơn (lấy mức cao hơn), không bao giờ nới lỏng."""
         backend = self._pick(scenario)
         try:
-            authorize(user, "receive", level)
+            effective = self._recorded_level(remote_name)
+            if level is not None and level > effective:
+                effective = level
+            authorize(user, "receive", effective)
             remote = self._remote(remote_name)
             with tempfile.TemporaryDirectory() as tmp:
                 enc = os.path.join(tmp, "payload.enc")
                 backend.download(remote, enc)
-                decrypt_file(enc, dest_path, self.key)
+                decrypt_file(enc, dest_path, self.key, self._crypto_context(remote_name, effective),
+                             allow_legacy=self.s.allow_legacy_enc)
         except Exception as e:
             self.audit.record(user.username, "receive", remote_name,
                               "denied" if isinstance(e, AuthError) else "error",

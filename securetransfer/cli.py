@@ -19,6 +19,7 @@ def main() -> None:
         sp.add_argument("--user", required=True)
         sp.add_argument("--scenario", choices=list(SCENARIO_PROTOCOL), default="partner")
         sp.add_argument("--level", choices=[l.name for l in Level], default="INTERNAL")
+    sub.choices["receive"].set_defaults(level=None)  # nhận: mức mật lấy từ nhật ký, --level chỉ để siết chặt thêm
     sub.choices["send"].add_argument("file")
     sub.choices["receive"].add_argument("remote_name")
     sub.choices["receive"].add_argument("dest")
@@ -66,7 +67,7 @@ def main() -> None:
         if a.cmd == "send":
             print("Đã gửi ->", gw.send(user, a.file, level=Level[a.level], scenario=a.scenario))
         else:
-            print("Đã nhận ->", gw.receive(user, a.remote_name, a.dest, Level[a.level], a.scenario))
+            print("Đã nhận ->", gw.receive(user, a.remote_name, a.dest, Level[a.level] if a.level else None, a.scenario))
 
 
 if __name__ == "__main__":

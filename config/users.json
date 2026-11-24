@@ -1,5 +1,17 @@
 {
-  "alice": {"role": "admin",   "clearance": "SECRET",       "password_hash": null},
-  "bob":   {"role": "staff",   "clearance": "INTERNAL",     "password_hash": null},
-  "carol": {"role": "auditor", "clearance": "CONFIDENTIAL", "password_hash": null}
+  "alice": {
+    "role": "admin",
+    "clearance": "SECRET",
+    "password_hash": "scrypt$16384$8$1$QyJ5202tniHJ0Anc0jJ7Nw$9gR0KmDoiqCjYG1HlS1iqLb6Gjf0iPpIXyGawh9Ja6aoH8eZZ-sR44LoI9CgTtiCtE08M0zaNZTCArxl9nvOWA"
+  },
+  "bob": {
+    "role": "staff",
+    "clearance": "INTERNAL",
+    "password_hash": "scrypt$16384$8$1$fcxoHcM7dSs2M-H3rd237Q$lMXwZ_Y6RSOFcjeRFrUXXWHtWkZPKEn7ey3DL93QIoMrbBkD5_ylLLgl30RLlPS94v07UVZrSOGTNL_w7m7Ldg"
+  },
+  "carol": {
+    "role": "auditor",
+    "clearance": "CONFIDENTIAL",
+    "password_hash": "scrypt$16384$8$1$P8uEjXMGmRfEZSNb4W32FQ$TMsuU_UM2ymNEEeOVRyyLlQVf28dQBsuz_izob3-Mj_qZWFxRrfPASH5WIsngOK7KRsEn3P-FPn4G8kFgyXZ3g"
+  }
 }

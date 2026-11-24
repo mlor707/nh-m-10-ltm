@@ -9,7 +9,7 @@ import os
 import shutil
 import tempfile
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
@@ -17,8 +17,10 @@ from starlette.background import BackgroundTask
 from .audit import AuditLog
 from .auth import PERMISSIONS, AuthError, Level, Role, TokenManager, User, UserStore, authorize
 from .config import Settings
+from .docindex import DocumentIndex
 from .crypto import CryptoError
 from .gateway import SCENARIO_PROTOCOL, ConflictError, Gateway
+from .ratelimit import LoginThrottle
 from .shares import ShareError, ShareStore
 from .transfer import TransferError
 
@@ -44,6 +46,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     tokens = TokenManager(settings.jwt_secret) if settings.jwt_secret else None
     audit_log = AuditLog.from_settings(settings)  # MỘT instance cho cả API và Gateway (khóa, Syslog, HMAC dùng chung)
     app.state.audit = audit_log
+    doc_index = DocumentIndex(audit_log, Gateway.document_key)   # chỉ đọc phần audit mới, không quét lại cả log
+    throttle = LoginThrottle(settings.login_max_failures, settings.login_window_seconds,
+                             settings.login_lockout_seconds)
     holder: dict[str, Gateway] = {}
     shares = ShareStore(os.path.join(settings.data_dir, "shares.json"))
     app.state.shares = shares
@@ -79,15 +84,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def visible_documents(user: User) -> list[dict]:
         """Danh sách tài liệu suy ra từ audit log (các lần gửi thành công), chỉ gồm tài liệu user đủ cấp độ mở."""
-        latest: dict[str, dict] = {}
-        for e in audit().read_all():
-            if e["action"] == "send" and e["status"] == "ok":
-                latest[Gateway.document_key(e["target"])] = {
-                    "name": e["target"], "level": e["details"].get("level", "SECRET"),
+        docs = []
+        for e in doc_index.latest_all():
+            level = e["details"].get("level", "SECRET")
+            if Level[level] <= user.clearance:
+                docs.append({
+                    "name": e["target"], "level": level,
                     "protocol": e["details"].get("protocol", ""), "sender": e["user"], "ts": e["ts"],
                     "version": e["hash"],
-                }
-        docs = [d for d in latest.values() if Level[d["level"]] <= user.clearance]
+                })
         return sorted(docs, key=lambda d: d["ts"], reverse=True)
 
     # ---------- Giao diện ----------
@@ -101,14 +106,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok"}
 
     @app.post("/login")
-    def login(credentials: LoginRequest):
+    def login(credentials: LoginRequest, request: Request):
         if tokens is None:
             raise HTTPException(503, "Chưa cấu hình ST_JWT_SECRET")
+        ip = request.client.host if request.client else "?"
+        wait = throttle.blocked(ip, credentials.username)   # kiểm tra TRƯỚC khi xác thực: đang khóa thì mật khẩu đúng cũng bị chặn
+        if wait:
+            raise HTTPException(429, f"Đăng nhập sai quá nhiều lần, thử lại sau {wait} giây",
+                                headers={"Retry-After": str(wait)})
         try:
             user = users.authenticate(credentials.username, credentials.password)
         except AuthError as e:
-            audit().record(credentials.username, "login", "-", "denied", {"error": str(e)})
+            locked = throttle.failure(ip, credentials.username)
+            details = {"error": str(e), "ip": ip}
+            if locked:
+                details["locked"] = True       # chỉ ghi dấu khi BẮT ĐẦU khóa, tránh làm phình nhật ký khi bị tấn công
+            audit().record(credentials.username, "login", "-", "denied", details)
             raise HTTPException(401, "Tên đăng nhập hoặc mật khẩu không đúng") from e
+        throttle.success(ip, credentials.username)
         audit().record(user.username, "login", "-", "ok")
         return {
             "access_token": tokens.issue(user.username),
@@ -161,12 +176,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def current_version(name: str) -> str | None:
         """Mã phiên bản (hash dòng audit) của lần gửi mới nhất của tài liệu; None nếu chưa từng gửi."""
-        key = Gateway.document_key(name)
-        last = None
-        for e in audit().read_all():
-            if e["action"] == "send" and e["status"] == "ok" and Gateway.document_key(e["target"]) == key:
-                last = e["hash"]
-        return last
+        last = doc_index.latest(Gateway.document_key(name))
+        return last["hash"] if last else None
 
     @app.get("/documents/{name}/download")
     def download_document(name: str, user: User = Depends(current_user)):
