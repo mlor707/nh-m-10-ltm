@@ -13,7 +13,7 @@
 
 ## Tình trạng hiện tại
 
-**Đã chạy được và có test tự động (128 test, chạy bằng `python -m pytest -q`):**
+**Đã chạy được và có test tự động (hơn 200 test, chạy bằng `python -m pytest -q`):**
 - Gửi và nhận tài liệu qua **FTPS, SCP, rsync, SFTP** bằng một gateway duy nhất, chọn giao thức theo tình huống.
 - Tài liệu được mã hóa **AES-256-GCM** trước khi gửi tới máy chủ lưu trữ, nên máy chủ lưu trữ chỉ thấy bản mã hóa.
 - Đăng nhập bằng mật khẩu (băm scrypt) và token JWT; phân quyền theo 3 vai trò và 4 mức mật.
@@ -124,7 +124,11 @@ Các project trên mỗi cái chỉ giải quyết **một giao thức hoặc m�
 - Đăng nhập bằng mật khẩu băm scrypt (tối thiểu 12 ký tự) và token JWT hết hạn sau 60 phút; mọi lần đăng nhập, kể cả thất bại, đều ghi vào nhật ký.
 - Chặn gửi đè tài liệu trùng tên và chặn hạ mức mật khi ghi đè; link chia sẻ gắn với một phiên bản tài liệu nên hết hiệu lực khi tài liệu bị thay.
 - Kết nối SSH an toàn hơn: chế độ `strict host key` (chỉ tin máy chủ đã được xác nhận, chặn khi khóa máy chủ đổi), lệnh `trust-host` và lệnh chẩn đoán `ssh-check`.
-- Giới hạn dung lượng upload 50 MB, thông báo lỗi tiếng Việt, 128 test tự động.
+- Giới hạn dung lượng upload 50 MB, thông báo lỗi tiếng Việt, hơn 200 test tự động.
+- Giới hạn đăng nhập sai: quá 5 lần trong 5 phút thì khóa 5 phút (HTTP 429 kèm `Retry-After`), đếm theo cặp (IP, tên đăng nhập) và theo riêng tên đăng nhập; chỉnh bằng `ST_LOGIN_MAX_FAILURES`, `ST_LOGIN_WINDOW_SECONDS`, `ST_LOGIN_LOCKOUT_SECONDS`.
+- `receive` tự lấy mức mật thật của tài liệu từ nhật ký kiểm toán, không tin tham số `level` do người gọi khai.
+- Chống thực thi lệnh qua tên file đặc biệt với rsync (dùng `-s` khi rsync từ 3.0.9, bản cũ hơn thì thoát bằng `shlex.quote`).
+- Audit ghi tăng dần, không đọc lại cả file mỗi lần; chỉ mục tài liệu `docindex.py` dựng từ nhật ký.
 
 ---
 
@@ -133,9 +137,9 @@ Các project trên mỗi cái chỉ giải quyết **một giao thức hoặc m�
 | Nhóm | Đã làm được | Nơi xem |
 |------|-------------|---------|
 | Truyền tệp | Gateway FTPS, SCP, rsync, SFTP (mốc so sánh); tự chọn giao thức theo tình huống | `securetransfer/gateway.py`, `transfer/` |
-| Mã hóa | AES-256-GCM chia khối 1 MiB, mỗi khối có nonce riêng và AAD (số thứ tự, cờ khối cuối) nên phát hiện đảo khối và cắt cụt file | `securetransfer/crypto.py` |
+| Mã hóa | AES-256-GCM chia khối 1 MiB, mỗi khối có nonce riêng và AAD (số thứ tự, cờ khối cuối, tên tài liệu, mức mật; định dạng STF2) nên phát hiện đảo khối, cắt cụt file, đổi tên hoặc hạ mức mật của bản mã | `securetransfer/crypto.py` |
 | Xác thực, phân quyền | Mật khẩu băm scrypt, JWT hết hạn sau 60 phút, 3 vai trò (admin, staff, auditor), 4 mức mật | `auth.py`, `api.py` |
-| Nhật ký kiểm toán | Hash-chain; bật `ST_AUDIT_KEY` để dùng HMAC và file `.head` chống xóa dòng cuối; ghi cả lần bị từ chối; gửi Syslog tùy chọn | `audit.py` |
+| Nhật ký kiểm toán | Hash-chain; bật `ST_AUDIT_KEY` để dùng HMAC và file `.head` chống xóa dòng cuối; ghi cả lần bị từ chối; gửi Syslog tùy chọn; ghi tăng dần nên chi phí ghi gần như không phụ thuộc độ dài log | `audit.py`, `docindex.py` |
 | Chống ghi đè | Gửi trùng tên chỉ cho chủ tài liệu hoặc admin ghi đè, không được hạ mức mật (API trả 409) | `gateway.py` |
 | Chia sẻ có kiểm soát | Link có hạn dùng, giới hạn số lần tải, thu hồi, chặn tài liệu Tuyệt mật, gắn với một phiên bản tài liệu | `shares.py` |
 | So sánh giao thức | Đo thời gian gửi và nhận, tốc độ, kiểm tra toàn vẹn SHA-256, xuất CSV | `benchmark.py` |
@@ -201,7 +205,7 @@ Mở http://127.0.0.1:8000 và đăng nhập. Trang tài liệu API (Swagger) �
 **Dòng lệnh**
 ```
 python -m securetransfer.cli send --user alice --level SECRET hopdong.pdf
-python -m securetransfer.cli receive --user alice --level SECRET hopdong.pdf ra.pdf
+python -m securetransfer.cli receive --user alice hopdong.pdf ra.pdf
 python -m securetransfer.cli audit-verify
 python -m securetransfer.cli ssh-check
 python -m securetransfer.cli benchmark --sizes 1 10 50 --repeat 3 --protocols scp sftp rsync ftps --csv data/benchmark.csv
@@ -217,8 +221,12 @@ python -m securetransfer.cli benchmark --sizes 1 10 50 --repeat 3 --protocols sc
 - **Giao diện web chạy HTTP.** Khi triển khai ngoài máy cá nhân phải đặt sau TLS.
 - **Cấu hình mặc định là chế độ phát triển:** `ST_FTPS_VERIFY=false`, `ST_SSH_STRICT_HOST_KEY` chưa bật. Khi chạy thật phải bật xác minh chứng chỉ và strict host key (xem `docs/DUNG_SSH_DEV.md`).
 - Audit log cục bộ không phát hiện được việc khôi phục cả log lẫn file `.head` từ bản sao cũ; nên gửi Syslog sang máy chủ riêng để đối chiếu.
-- Danh sách tài liệu hiện được suy ra từ nhật ký kiểm toán.
-- Chưa có giới hạn số lần đăng nhập sai.
+- Danh sách tài liệu được suy ra từ nhật ký kiểm toán qua một chỉ mục trong bộ nhớ (`docindex`), dựng lại từ log khi khởi động.
+- **Chưa chống rollback:** vẫn có thể chép lại bản mã cũ của chính tài liệu đó (cùng tên, cùng mức mật) mà không bị phát hiện. Muốn chặn phải gắn số phiên bản vào AAD.
+- Bộ đếm đăng nhập sai nằm trong bộ nhớ từng tiến trình: nhiều worker thì mỗi worker đếm riêng; sau reverse proxy phải cấu hình lấy IP thật của người dùng.
+- Audit chưa có khóa file giữa nhiều tiến trình nên chỉ nên chạy một tiến trình ghi; `/audit` và `verify()` vẫn đọc toàn bộ log.
+- JWT chưa thu hồi được khi đăng xuất hoặc đổi mật khẩu (chỉ hết hạn sau 60 phút).
+- File `.enc` định dạng cũ (STF1) bị từ chối; chỉ bật tạm `ST_ALLOW_LEGACY_ENC=true` khi di chuyển dữ liệu cũ rồi tắt lại.
 - **Chưa làm:** đồng bộ LDAP, SSO Kerberos, quy trình phê duyệt 2 người, xuất báo cáo tuân thủ.
 - Số đo so sánh giao thức đang được cập nhật trong [docs/SO_SANH_GIAO_THUC.md](docs/SO_SANH_GIAO_THUC.md) (mục 5).
 
@@ -242,6 +250,8 @@ securetransfer/
   gateway.py      kiểm quyền, chống ghi đè, mã hóa, chọn giao thức, ghi nhật ký
   crypto.py       AES-256-GCM theo khối
   audit.py        nhật ký hash-chain / HMAC, Syslog
+  docindex.py     chỉ mục tài liệu dựng từ nhật ký kiểm toán
+  ratelimit.py    giới hạn đăng nhập sai
   shares.py       link chia sẻ có thời hạn
   benchmark.py    so sánh giao thức
   transfer/       FTPS, SCP, rsync, SFTP (chung giao diện TransferBackend)
